@@ -41,10 +41,12 @@ SCRIMS = {
     }
 }
 
+# --- Intents და Bot-ის გამართვა ---
 intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-intents.reactions = True 
+intents.message_content = True  # აუცილებელია ბრძანებებისთვის
+intents.members = True          # აუცილებელია როლებისთვის
+intents.reactions = True        # აუცილებელია ✅/❌ რეაქციებისთვის
+
 bot = commands.Bot(command_prefix="%", intents=intents)
 
 last_msg_ids = {}
@@ -67,8 +69,10 @@ async def update_all_displays(scrim_key):
 async def render_embed(channel_id, title, scrim_key):
     channel = bot.get_channel(channel_id)
     if not channel: return
-    try: await channel.purge(limit=15, check=lambda m: m.author == bot.user)
-    except: pass
+    try: 
+        await channel.purge(limit=15, check=lambda m: m.author == bot.user)
+    except: 
+        pass
 
     data = get_scrim_data(scrim_key)
     cfg = SCRIMS[scrim_key]
@@ -88,7 +92,8 @@ async def render_embed(channel_id, title, scrim_key):
             content += f"**{i:02d}.** {lbl}\n"
     else:
         waitlist = data.get("waitlist", [])
-        if not waitlist: content += "*ჯერჯერობით ცარიელია...*"
+        if not waitlist: 
+            content += "*ჯერჯერობით ცარიელია...*"
         else:
             for i, team in enumerate(waitlist, 1):
                 content += f"**{i:02d}.** 📋 **{team['name']}** [{team['tag']}] - <@{team['manager_id']}>\n"
@@ -99,6 +104,25 @@ async def render_embed(channel_id, title, scrim_key):
         last_msg_ids[scrim_key] = msg.id
         await msg.add_reaction("✅")
         await msg.add_reaction("❌")
+
+# --- ივენთები ---
+@bot.event
+async def on_message(message):
+    if message.author == bot.user:
+        return
+    
+    # ვამოწმებთ, არის თუ არა შეტყობინება რეგისტრაციის ჩანელში
+    scrim_key = next((k for k, v in SCRIMS.items() if message.channel.id == v["reg_channel"]), None)
+    
+    # თუ რეგისტრაციის ჩანელში ვართ, ვატარებთ ბრძანებებს
+    if scrim_key:
+        await bot.process_commands(message)
+
+@bot.event
+async def on_ready():
+    logger.info(f'✅ Belis Bot მზად არის MongoDB-ზე!')
+    if not check_deadline.is_running(): 
+        check_deadline.start()
 
 # --- რეგისტრაცია ---
 @bot.command()
@@ -114,7 +138,8 @@ async def register(ctx, *, text: str = None):
     manager = ctx.author
     if ctx.message.mentions:
         manager = ctx.message.mentions[0]
-        parts = [p for p in parts if not p.startswith('<@')]
+        # ვასუფთავებთ ტექსტს მენეშენისგან
+        parts = [p for p in parts if not (p.startswith('<@') and p.endswith('>'))]
 
     if len(parts) < 2:
         await ctx.send("❌ დაწერეთ გუნდის სახელი და თეგი!", delete_after=5)
@@ -178,9 +203,12 @@ async def on_raw_reaction_add(payload):
             if t['manager_id'] == payload.user_id:
                 idx = data["teams"].index(t)
                 if idx < 22:
-                    if data["waitlist"]: data["teams"][idx] = data["waitlist"].pop(0)
-                    else: data["teams"][idx] = {'name': 'Reserved', 'tag': '---', 'manager_id': bot.user.id, 'confirmed': True}
-                else: data["teams"].remove(t)
+                    if data["waitlist"]: 
+                        data["teams"][idx] = data["waitlist"].pop(0)
+                    else: 
+                        data["teams"][idx] = {'name': 'Reserved', 'tag': '---', 'manager_id': bot.user.id, 'confirmed': True}
+                else: 
+                    data["teams"].remove(t)
                 
                 member = guild.get_member(payload.user_id)
                 role = guild.get_role(cfg["role_id"])
@@ -212,17 +240,14 @@ async def check_deadline():
                         if r and m: 
                             try: await m.remove_roles(r)
                             except: pass
-                    if data["waitlist"]: data["teams"][idx] = data["waitlist"].pop(0)
-                    else: data["teams"][idx] = {'name': 'Reserved', 'tag': '---', 'manager_id': bot.user.id, 'confirmed': True}
+                    if data["waitlist"]: 
+                        data["teams"][idx] = data["waitlist"].pop(0)
+                    else: 
+                        data["teams"][idx] = {'name': 'Reserved', 'tag': '---', 'manager_id': bot.user.id, 'confirmed': True}
                     changed = True
             if changed:
                 save_scrim_data(key, data)
                 await update_all_displays(key)
-
-@bot.event
-async def on_ready():
-    logger.info(f'✅ Belis Bot მზად არის MongoDB-ზე!')
-    if not check_deadline.is_running(): check_deadline.start()
 
 if __name__ == "__main__":
     token = os.getenv('DISCORD_TOKEN')
