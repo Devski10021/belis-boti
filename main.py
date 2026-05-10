@@ -21,7 +21,7 @@ db = cluster["belis_scrims"]
 collection = db["storage"]
 
 # --- კონფიგურაცია ---
-TOTAL_SLOTS = 22 # აქ შევცვალე 22-ზე, რადგან პირველი სლოტი ადმინისაა
+TOTAL_SLOTS = 22 
 GUILD_ID = 1502260559721005148
 SCRIMS = {
     "scrim_22": {
@@ -85,7 +85,6 @@ async def render_embed(channel_id, title, scrim_key):
             vip = "💎 **[VIP]** " if i >= 24 else ""
             content += f"**{i:02d}.** {status}{vip}**{team['name']}** [{team['tag']}]\n└ მენეჯერი: <@{team['manager_id']}>\n\n"
         
-        # აქ ვამატებთ ცარიელ ხაზებს, თუ სლოტები თავისუფალია
         for i in range(len(teams) + 2, 26):
             lbl = "💎 VIP SLOT" if i >= 24 else "--------------------------------"
             content += f"**{i:02d}.** {lbl}\n"
@@ -106,13 +105,14 @@ async def render_embed(channel_id, title, scrim_key):
 @bot.event
 async def on_message(message):
     if message.author == bot.user: return
-    scrim_key = next((k for k, v in SCRIMS.items() if message.channel.id == v["reg_channel"]), None)
-    if scrim_key: await bot.process_commands(message)
+    await bot.process_commands(message)
 
 @bot.event
 async def on_ready():
     logger.info(f'✅ ბოტი ჩაირთო: {bot.user.name}')
     if not check_deadline.is_running(): check_deadline.start()
+
+# --- ბრძანებები ---
 
 @bot.command()
 async def register(ctx, *, text: str = None):
@@ -135,13 +135,12 @@ async def register(ctx, *, text: str = None):
     team_name = " ".join(parts[:-1])
 
     data = get_scrim_data(scrim_key)
-    # ვამოწმებთ უკვე არის თუ არა რეგისტრირებული
     if any(t['manager_id'] == manager.id for t in data["teams"] + data["waitlist"]):
         return await ctx.send(f"⚠️ {manager.display_name} უკვე რეგისტრირებულია!", delete_after=5)
 
     new_team = {'name': team_name, 'tag': team_tag, 'manager_id': manager.id, 'confirmed': False}
     
-    if len(data["teams"]) < 22: # 22 სლოტი + 1 ადმინის = 23. (24, 25 VIP-ია)
+    if len(data["teams"]) < 22:
         data["teams"].append(new_team)
         await ctx.message.add_reaction("✅")
     else:
@@ -155,6 +154,25 @@ async def register(ctx, *, text: str = None):
         try: await manager.add_roles(role)
         except: pass
     await update_all_displays(scrim_key)
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def reset(ctx):
+    """ასუფთავებს სკრიმის მონაცემებს (მხოლოდ ადმინისთვის)"""
+    scrim_key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
+    
+    if not scrim_key:
+        return await ctx.send("❌ ეს ბრძანება გამოიყენეთ მხოლოდ რეგისტრაციის ჩანელში!", delete_after=5)
+
+    try:
+        save_scrim_data(scrim_key, {"teams": [], "waitlist": []})
+        await update_all_displays(scrim_key)
+        await ctx.send(f"✅ {SCRIMS[scrim_key]['name']} წარმატებით განულდა!", delete_after=10)
+    except Exception as e:
+        logger.error(f"Error in reset: {e}")
+        await ctx.send("❌ მოხდა შეცდომა განულებისას.")
+
+# --- ივენთები და თასქები ---
 
 @bot.event
 async def on_raw_reaction_add(payload):
@@ -175,19 +193,14 @@ async def on_raw_reaction_add(payload):
                 break
 
     elif str(payload.emoji) == "❌":
-        # ვეძებთ გუნდს სიებში
         team_to_remove = next((t for t in data["teams"] if t['manager_id'] == payload.user_id), None)
-        
         if team_to_remove:
             data["teams"].remove(team_to_remove)
-            # თუ ვინმე არის ვეითლისტში, გადმოგვყავს თავისუფალ ადგილზე
             if data["waitlist"]:
                 promoted_team = data["waitlist"].pop(0)
                 data["teams"].append(promoted_team)
-            
             updated = True
             
-            # როლის ჩამორთმევა
             member = guild.get_member(payload.user_id)
             role = guild.get_role(cfg["role_id"])
             if role and member:
