@@ -4,6 +4,7 @@ from datetime import datetime
 import pytz
 import os
 import logging
+import certifi  # დამატებულია SSL სერტიფიკატებისთვის
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
@@ -15,7 +16,8 @@ load_dotenv()
 
 # --- MongoDB დაკავშირება ---
 MONGO_URL = os.getenv('MONGO_URL')
-cluster = MongoClient(MONGO_URL)
+# დამატებულია tlsCAFile=certifi.where() Render-ზე კავშირის პრობლემის მოსაგვარებლად
+cluster = MongoClient(MONGO_URL, tlsCAFile=certifi.where())
 db = cluster["belis_scrims"]
 collection = db["storage"]
 
