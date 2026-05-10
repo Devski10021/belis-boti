@@ -120,9 +120,19 @@ async def on_message(message):
 
 @bot.event
 async def on_ready():
-    logger.info(f'✅ Belis Bot მზად არის MongoDB-ზე!')
+    print("--- ბოტი იწყებს დაქოქვას ---")
+    logger.info(f'✅ ბოტი სისტემაში შევიდა: {bot.user.name}')
+    
+    try:
+        # ვამოწმებთ ბაზასთან კავშირს
+        cluster.admin.command('ping')
+        logger.info("✅ MongoDB-თან კავშირი დამყარებულია!")
+    except Exception as e:
+        logger.error(f"❌ MongoDB-სთან დაკავშირება ვერ მოხერხდა: {e}")
+
     if not check_deadline.is_running(): 
         check_deadline.start()
+    print("--- ბოტი სრულად მზად არის ---")
 
 # --- რეგისტრაცია ---
 @bot.command()
