@@ -9,13 +9,12 @@ from pymongo import MongoClient
 from dotenv import load_dotenv
 
 # ─── CONFIGURATION & LOGGING ──────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(name)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('BelisBot')
 load_dotenv()
+
+# აქ ჩაწერე იმ ხალხის ID ვისაც ბანი აქვთ
+BANNED_USERS = [1234567890] 
 
 # ─── DATABASE SETUP ───────────────────────────────────────────────────────────
 try:
@@ -31,6 +30,8 @@ except Exception as e:
 VIP_EMOJI = "<:diamond:1390948554956341301>"
 CONFIRM_EMOJI = "✅"
 CANCEL_EMOJI = "❌"
+WAIT_EMOJI = "📋"
+BAN_EMOJI = "🚫"
 EMPTY_SLOT = "▫️"
 ADMIN_SLOT = "🛡️"
 
@@ -65,9 +66,7 @@ last_msg_ids = {}
 # ─── HELPER FUNCTIONS ─────────────────────────────────────────────────────────
 def get_data(key):
     res = collection.find_one({"_id": key})
-    if not res:
-        return {"teams": [], "waitlist": [], "vips": {}, "status": "OPEN"}
-    return res
+    return res if res else {"teams": [], "waitlist": [], "vips": {}, "status": "OPEN"}
 
 def save_data(key, data):
     collection.update_one({"_id": key}, {"$set": data}, upsert=True)
@@ -77,7 +76,6 @@ async def apply_roles(member, scrim_key, action):
     cfg = SCRIMS[scrim_key]
     r_main = member.guild.get_role(cfg["role_id"])
     r_wait = member.guild.get_role(cfg["wait_role_id"])
-    
     try:
         if action == "main":
             if r_wait: await member.remove_roles(r_wait)
@@ -88,23 +86,17 @@ async def apply_roles(member, scrim_key, action):
         elif action == "none":
             if r_main: await member.remove_roles(r_main)
             if r_wait: await member.remove_roles(r_wait)
-    except Exception as e:
-        logger.warning(f"Role change failed for {member.name}: {e}")
+    except: pass
 
 # ─── EMBED BUILDERS ──────────────────────────────────────────────────────────
 def create_main_embed(scrim_key, data, guild):
     cfg = SCRIMS[scrim_key]
     teams = data.get("teams", [])
     vips = data.get("vips", {})
-    
     status_icon = "🟢" if data.get("status") == "OPEN" else "🔴"
     embed = discord.Embed(
         title=f"🏆 {cfg['name']}",
-        description=(
-            f"**{status_icon} Status:** `{data.get('status', 'OPEN')}`\n"
-            f"**👥 Slots:** `{len(teams) + len(vips) + 1}/25` (Admin Incl.)\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━"
-        ),
+        description=f"**{status_icon} Status:** `{data.get('status', 'OPEN')}`\n**👥 Slots:** `{len(teams) + len(vips) + 1}/25` (Admin Incl.)\n━━━━━━━━━━━━━━━━━━━━━━━━",
         color=cfg["color"],
         timestamp=datetime.utcnow()
     )
@@ -119,39 +111,41 @@ def create_main_embed(scrim_key, data, guild):
 
     col1 = [f"{ADMIN_SLOT} **Slot 01:** `ELITE HOST`"]
     for i in range(2, 14): col1.append(get_slot_text(i, teams))
-
     col2 = []
     for i in range(14, 24): col2.append(get_slot_text(i, teams))
-    
     for i in ["24", "25"]:
         v = vips.get(i)
-        if v:
-            status = CONFIRM_EMOJI if v.get("confirmed") else "⏳"
-            col2.append(f"{status} {VIP_EMOJI} **Slot {i}:** {v['name']} `[{v['tag']}]` \n└ <@{v['manager_id']}>")
-        else:
-            col2.append(f"🔹 **Slot {i}:** *VIP Reservation*")
+        if v: col2.append(f"{CONFIRM_EMOJI} {VIP_EMOJI} **Slot {i}:** {v['name']} `[{v['tag']}]` \n└ <@{v['manager_id']}>")
+        else: col2.append(f"🔹 **Slot {i}:** *VIP Reservation*")
 
     embed.add_field(name="󠂪", value="\n".join(col1), inline=True)
     embed.add_field(name="󠂪", value="\n".join(col2), inline=True)
-    embed.set_footer(text="React ✅ to confirm or ❌ to leave • Auto-update active")
+    embed.set_footer(text="React ✅ to confirm or ❌ to leave")
+    return embed
+
+def create_wait_embed(scrim_key, data):
+    cfg = SCRIMS[scrim_key]; wl = data.get("waitlist", [])
+    embed = discord.Embed(title=f"{WAIT_EMOJI} Waitlist — {cfg['name']}", color=0x34495e)
+    if wl:
+        desc = ""
+        for i, t in enumerate(wl):
+            desc += f"{WAIT_EMOJI} `#{i+1:02d}` **{t['name']}** `[{t['tag']}]` — <@{t['manager_id']}>\n"
+        embed.description = desc
+    else: embed.description = "```diff\n- No teams in waitlist\n```"
     return embed
 
 async def refresh_displays(scrim_key, guild):
     cfg = SCRIMS[scrim_key]; data = get_data(scrim_key)
     slot_ch = bot.get_channel(cfg["slot_channel"])
     if slot_ch:
-        try:
-            await slot_ch.purge(limit=15, check=lambda m: m.author == bot.user)
-            msg = await slot_ch.send(embed=create_main_embed(scrim_key, data, guild))
-            last_msg_ids[scrim_key] = msg.id
-            await msg.add_reaction(CONFIRM_EMOJI); await msg.add_reaction(CANCEL_EMOJI)
-        except Exception as e: logger.error(f"Slot Refresh error: {e}")
+        await slot_ch.purge(limit=5, check=lambda m: m.author == bot.user)
+        msg = await slot_ch.send(embed=create_main_embed(scrim_key, data, guild))
+        last_msg_ids[scrim_key] = msg.id
+        await msg.add_reaction(CONFIRM_EMOJI); await msg.add_reaction(CANCEL_EMOJI)
     wait_ch = bot.get_channel(cfg["wait_channel"])
     if wait_ch:
-        try:
-            await wait_ch.purge(limit=15, check=lambda m: m.author == bot.user)
-            await wait_ch.send(embed=discord.Embed(title=f"📋 Waitlist — {cfg['name']}", color=0x34495e, description="Waitlist updates automatically."))
-        except Exception as e: logger.error(f"Wait Refresh error: {e}")
+        await wait_ch.purge(limit=5, check=lambda m: m.author == bot.user)
+        await wait_ch.send(embed=create_wait_embed(scrim_key, data))
 
 # ─── CORE EVENTS ──────────────────────────────────────────────────────────────
 @bot.event
@@ -160,60 +154,63 @@ async def on_raw_reaction_add(payload):
     for key, cfg in SCRIMS.items():
         if payload.message_id == last_msg_ids.get(key):
             guild = bot.get_guild(payload.guild_id); user = guild.get_member(payload.user_id); data = get_data(key)
-            
-            # ვეძებთ სლოტს მენეჯერის ID-ით
             user_team_idx = next((i for i, t in enumerate(data["teams"]) if t["manager_id"] == payload.user_id), None)
             vip_slot = next((k for k, v in data["vips"].items() if v["manager_id"] == payload.user_id), None)
             is_admin = user.guild_permissions.administrator
             
             msg = await bot.get_channel(payload.channel_id).fetch_message(payload.message_id)
-
             changed = False
-            
-            # --- CONFIRM (✅) ---
+
             if str(payload.emoji) == CONFIRM_EMOJI:
                 if user_team_idx is not None:
-                    if not data["teams"][user_team_idx]["confirmed"]: 
-                        data["teams"][user_team_idx]["confirmed"] = True
-                        changed = True
+                    if not data["teams"][user_team_idx]["confirmed"]: data["teams"][user_team_idx]["confirmed"] = True; changed = True
                 elif vip_slot:
-                    if not data["vips"][vip_slot].get("confirmed"):
-                        data["vips"][vip_slot]["confirmed"] = True
-                        changed = True
-                elif is_admin: # ადმინს შეუძლია პირველივე დაუდასტურებელი დაადასტუროს
+                    if not data["vips"][vip_slot].get("confirmed"): data["vips"][vip_slot]["confirmed"] = True; changed = True
+                elif is_admin:
                     for t in data["teams"]:
                         if not t["confirmed"]: t["confirmed"] = True; changed = True; break
-                else:
-                    await msg.remove_reaction(payload.emoji, user)
 
-            # --- REMOVE/UNCONFIRM (❌) ---
             elif str(payload.emoji) == CANCEL_EMOJI:
                 if user_team_idx is not None:
-                    # მენეჯერი აჭერს ❌-ს -> ამოვარდეს სლოტიდან
                     data["teams"].pop(user_team_idx)
                     await apply_roles(user, key, "none")
                     changed = True
-                    
-                    # ვეითლისტიდან გადმოყვანა
                     if data["waitlist"]:
                         promo = data["waitlist"].pop(0)
+                        promo["confirmed"] = True
                         data["teams"].append(promo)
                         p_member = guild.get_member(promo["manager_id"])
                         if p_member: await apply_roles(p_member, key, "main")
-                        
                 elif vip_slot:
                     del data["vips"][vip_slot]
                     await apply_roles(user, key, "none")
                     changed = True
-                else:
-                    # თუ არც მენეჯერია და არც ვიპი, უბრალოდ რეაქცია წაუშალოს
-                    await msg.remove_reaction(payload.emoji, user)
+                else: await msg.remove_reaction(payload.emoji, user)
 
-            if changed: 
-                save_data(key, data)
-                await refresh_displays(key, guild)
+            if changed: save_data(key, data); await refresh_displays(key, guild)
 
-# (დანარჩენი COMMANDS იგივე დარჩა...)
+# ─── COMMANDS ─────────────────────────────────────────────────────────────────
+@bot.command(name="register", aliases=["reg"])
+async def register(ctx, clan_name: str, clan_tag: str, manager: discord.Member = None):
+    key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
+    if not key: return
+    target_manager = manager if manager else ctx.author
+    if target_manager.id in BANNED_USERS: return await ctx.send(f"{BAN_EMOJI} ბანი გაქვს!")
+    data = get_data(key)
+    if any(t["manager_id"] == target_manager.id for t in data["teams"] + data["waitlist"]): return await ctx.send("Already in!")
+    
+    # ავტომატური ✅
+    new_team = {"name": clan_name, "tag": clan_tag.upper(), "manager_id": target_manager.id, "confirmed": True}
+    
+    if len(data["teams"]) < 22:
+        data["teams"].append(new_team); await apply_roles(target_manager, key, "main")
+        msg = f"{CONFIRM_EMOJI} **{clan_name}** In!"
+    else:
+        data["waitlist"].append(new_team); await apply_roles(target_manager, key, "wait")
+        msg = f"{WAIT_EMOJI} **{clan_name}** Waitlist!"
+    
+    save_data(key, data); await refresh_displays(key, ctx.guild); await ctx.send(msg)
+
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def edit(ctx, slot_num: int, manager: discord.Member, clan_tag: str, *, clan_name: str):
@@ -234,26 +231,11 @@ async def edit(ctx, slot_num: int, manager: discord.Member, clan_tag: str, *, cl
         await apply_roles(manager, key, "main")
     save_data(key, data); await refresh_displays(key, ctx.guild)
 
-@bot.command(name="register", aliases=["reg"])
-async def register(ctx, clan_name: str, clan_tag: str, manager: discord.Member = None):
-    key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
-    if not key: return
-    data = get_data(key); target_manager = manager if manager else ctx.author
-    if any(t["manager_id"] == target_manager.id for t in data["teams"]): return await ctx.send("Already registered")
-    new_team = {"name": clan_name, "tag": clan_tag.upper(), "manager_id": target_manager.id, "confirmed": False}
-    if len(data["teams"]) < 22:
-        data["teams"].append(new_team); await apply_roles(target_manager, key, "main")
-    else:
-        data["waitlist"].append(new_team); await apply_roles(target_manager, key, "wait")
-    save_data(key, data); await refresh_displays(key, ctx.guild)
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def reset(ctx):
     key = next((k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["slot_channel"]]), None)
-    if not key: return
-    save_data(key, {"teams": [], "waitlist": [], "vips": {}, "status": "OPEN"})
-    await refresh_displays(key, ctx.guild)
+    if key: save_data(key, {"teams": [], "waitlist": [], "vips": {}, "status": "OPEN"}); await refresh_displays(key, ctx.guild)
 
 @bot.event
 async def on_ready(): print(f"SYSTEM: {bot.user.name} IS ONLINE")
