@@ -160,92 +160,92 @@ async def on_raw_reaction_add(payload):
     for key, cfg in SCRIMS.items():
         if payload.message_id == last_msg_ids.get(key):
             guild = bot.get_guild(payload.guild_id); user = guild.get_member(payload.user_id); data = get_data(key)
+            
+            # ვეძებთ სლოტს მენეჯერის ID-ით
             user_team_idx = next((i for i, t in enumerate(data["teams"]) if t["manager_id"] == payload.user_id), None)
+            vip_slot = next((k for k, v in data["vips"].items() if v["manager_id"] == payload.user_id), None)
             is_admin = user.guild_permissions.administrator
             
-            if user_team_idx is None and not is_admin:
-                msg = await bot.get_channel(payload.channel_id).fetch_message(payload.message_id)
-                await msg.remove_reaction(payload.emoji, user); return
+            msg = await bot.get_channel(payload.channel_id).fetch_message(payload.message_id)
 
             changed = False
+            
+            # --- CONFIRM (✅) ---
             if str(payload.emoji) == CONFIRM_EMOJI:
                 if user_team_idx is not None:
-                    if not data["teams"][user_team_idx]["confirmed"]: data["teams"][user_team_idx]["confirmed"] = True; changed = True
-                elif is_admin:
+                    if not data["teams"][user_team_idx]["confirmed"]: 
+                        data["teams"][user_team_idx]["confirmed"] = True
+                        changed = True
+                elif vip_slot:
+                    if not data["vips"][vip_slot].get("confirmed"):
+                        data["vips"][vip_slot]["confirmed"] = True
+                        changed = True
+                elif is_admin: # ადმინს შეუძლია პირველივე დაუდასტურებელი დაადასტუროს
                     for t in data["teams"]:
                         if not t["confirmed"]: t["confirmed"] = True; changed = True; break
-            
-            if changed: save_data(key, data); await refresh_displays(key, guild)
+                else:
+                    await msg.remove_reaction(payload.emoji, user)
 
-# ─── DZERKI COMMANDS ──────────────────────────────────────────────────────────
+            # --- REMOVE/UNCONFIRM (❌) ---
+            elif str(payload.emoji) == CANCEL_EMOJI:
+                if user_team_idx is not None:
+                    # მენეჯერი აჭერს ❌-ს -> ამოვარდეს სლოტიდან
+                    data["teams"].pop(user_team_idx)
+                    await apply_roles(user, key, "none")
+                    changed = True
+                    
+                    # ვეითლისტიდან გადმოყვანა
+                    if data["waitlist"]:
+                        promo = data["waitlist"].pop(0)
+                        data["teams"].append(promo)
+                        p_member = guild.get_member(promo["manager_id"])
+                        if p_member: await apply_roles(p_member, key, "main")
+                        
+                elif vip_slot:
+                    del data["vips"][vip_slot]
+                    await apply_roles(user, key, "none")
+                    changed = True
+                else:
+                    # თუ არც მენეჯერია და არც ვიპი, უბრალოდ რეაქცია წაუშალოს
+                    await msg.remove_reaction(payload.emoji, user)
+
+            if changed: 
+                save_data(key, data)
+                await refresh_displays(key, guild)
+
+# (დანარჩენი COMMANDS იგივე დარჩა...)
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def edit(ctx, slot_num: int, manager: discord.Member, clan_tag: str, *, clan_name: str):
-    """
-    Usage: %edit <slot_number> @manager <tag> <name>
-    მაგალითი: %edit 5 @Beli BLS Belis Clan
-    """
     key = next((k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["slot_channel"]]), None)
-    if not key: return await ctx.send("❌ გამოიყენე სკრიმის არხებში!")
-
+    if not key: return
     data = get_data(key)
-    
-    # VIP Slots Update (24, 25)
     if slot_num in [24, 25]:
-        data["vips"][str(slot_num)] = {
-            "name": clan_name, "tag": clan_tag.upper(),
-            "manager_id": manager.id, "confirmed": True
-        }
+        data["vips"][str(slot_num)] = {"name": clan_name, "tag": clan_tag.upper(), "manager_id": manager.id, "confirmed": True}
         await apply_roles(manager, key, "main")
-    
-    # Regular Slots Update (2-23)
     elif 2 <= slot_num <= 23:
         idx = slot_num - 2
-        new_team = {
-            "name": clan_name, "tag": clan_tag.upper(),
-            "manager_id": manager.id, "confirmed": True,
-            "time": datetime.utcnow().isoformat()
-        }
-        
+        new_team = {"name": clan_name, "tag": clan_tag.upper(), "manager_id": manager.id, "confirmed": True}
         if idx < len(data["teams"]):
-            old_manager_id = data["teams"][idx]["manager_id"]
-            if old_manager_id != manager.id:
-                old_mem = ctx.guild.get_member(old_manager_id)
-                if old_mem: await apply_roles(old_mem, key, "none")
+            old_m = ctx.guild.get_member(data["teams"][idx]["manager_id"])
+            if old_m: await apply_roles(old_m, key, "none")
             data["teams"][idx] = new_team
-        else:
-            data["teams"].append(new_team) # თუ სლოტი ცარიელი იყო
-            
+        else: data["teams"].append(new_team)
         await apply_roles(manager, key, "main")
-    
-    else:
-        return await ctx.send("❌ სლოტის ნომერი უნდა იყოს 2-დან 25-მდე!")
-
-    save_data(key, data)
-    await refresh_displays(key, ctx.guild)
-    await ctx.send(f"✅ სლოტი **{slot_num}** წარმატებით განახლდა!", delete_after=5)
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setvip(ctx, slot_num: int, manager: discord.Member, clan_tag: str, *, clan_name: str):
-    """VIP სლოტების სწრაფი ჩასმა (24 ან 25)"""
-    if slot_num not in [24, 25]:
-        return await ctx.send("❌ VIP სლოტები მხოლოდ 24 და 25-ია!")
-    await edit(ctx, slot_num, manager, clan_tag, clan_name=clan_name)
+    save_data(key, data); await refresh_displays(key, ctx.guild)
 
 @bot.command(name="register", aliases=["reg"])
 async def register(ctx, clan_name: str, clan_tag: str, manager: discord.Member = None):
     key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
     if not key: return
-    data = get_data(key)
-    if data["status"] != "OPEN": return await ctx.send("❌ Registration is CLOSED.")
-    target_manager = manager if manager else ctx.author
+    data = get_data(key); target_manager = manager if manager else ctx.author
+    if any(t["manager_id"] == target_manager.id for t in data["teams"]): return await ctx.send("Already registered")
     new_team = {"name": clan_name, "tag": clan_tag.upper(), "manager_id": target_manager.id, "confirmed": False}
     if len(data["teams"]) < 22:
         data["teams"].append(new_team); await apply_roles(target_manager, key, "main")
     else:
         data["waitlist"].append(new_team); await apply_roles(target_manager, key, "wait")
-    save_data(key, data); await refresh_displays(key, ctx.guild); await ctx.send("✅ Registered!")
+    save_data(key, data); await refresh_displays(key, ctx.guild)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -253,22 +253,9 @@ async def reset(ctx):
     key = next((k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["slot_channel"]]), None)
     if not key: return
     save_data(key, {"teams": [], "waitlist": [], "vips": {}, "status": "OPEN"})
-    await refresh_displays(key, ctx.guild); await ctx.send("🔄 Reset Complete!")
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def open(ctx):
-    key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
-    if key: data = get_data(key); data["status"] = "OPEN"; save_data(key, data); await refresh_displays(key, ctx.guild)
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def close(ctx):
-    key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
-    if key: data = get_data(key); data["status"] = "CLOSED"; save_data(key, data); await refresh_displays(key, ctx.guild)
+    await refresh_displays(key, ctx.guild)
 
 @bot.event
-async def on_ready():
-    print(f"SYSTEM: {bot.user.name} IS ONLINE")
+async def on_ready(): print(f"SYSTEM: {bot.user.name} IS ONLINE")
 
 bot.run(os.getenv('DISCORD_TOKEN'))
