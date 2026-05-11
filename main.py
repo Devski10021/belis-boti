@@ -22,27 +22,27 @@ collection = db["storage"]
 
 # --- კონფიგურაცია ---
 TOTAL_SLOTS = 22 
-GUILD_ID = 1502260559721005148
+GUILD_ID = 1255212608659787778
 
 SCRIMS = {
     "scrim_22": {
         "name": "22:00 Scrim",
-        "reg_channel": 1502263142238130257,
-        "slot_channel": 1502263291093975040,
-        "wait_channel": 1502263311524171907,
-        "id_pass_channel": 1503316106243477504,
-        "role_id": 1502324856962814042,
-        "wait_role_id": 1503315546349899856,
+        "reg_channel": 1503324709557895288,
+        "slot_channel": 1503325306285588510,
+        "wait_channel": 1503325883182747742,
+        "id_pass_channel": 1503325459167969330,
+        "role_id": 1503327762109304863,
+        "wait_role_id": 1503328170311548949,
         "deadline_h": 19, "deadline_m": 30
     },
     "scrim_00": {
         "name": "00:30 Scrim",
-        "reg_channel": 1502596279748923462,
-        "slot_channel": 1502596374984790207,
-        "wait_channel": 1502596395259924541,
-        "id_pass_channel": 1503316187377831936,
-        "role_id": 1502596541280424058,
-        "wait_role_id": 1503315629166694400,
+        "reg_channel": 1503327037832691832,
+        "slot_channel": 1503327123337904189,
+        "wait_channel": 1503327364749459506,
+        "id_pass_channel": 1503327196880703659,
+        "role_id": 1503327805897707591,
+        "wait_role_id":1503328171884412978,
         "deadline_h": 22, "deadline_m": 30
     }
 }
@@ -189,6 +189,7 @@ async def register(ctx, *, text: str = None):
 
     save_scrim_data(scrim_key, data)
     await update_all_displays(scrim_key)
+
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def reset(ctx):
