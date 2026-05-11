@@ -133,9 +133,23 @@ async def on_ready():
 
 @bot.command()
 async def register(ctx, *, text: str = None):
-    scrim_key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
+    # ვამოწმებთ, არის თუ არა ეს რეგისტრაციის ან ვეითლისტის ჩანელი
+    scrim_key = None
+    is_waitlist_reg = False
+    
+    for k, v in SCRIMS.items():
+        if ctx.channel.id == v["reg_channel"]:
+            scrim_key = k
+            break
+        elif ctx.channel.id == v["wait_channel"]:
+            scrim_key = k
+            is_waitlist_reg = True
+            break
+            
     if not scrim_key: return
-    if not text: return await ctx.send("❌ ფორმატი: `%register გუნდი თეგი @მენეჯერი`", delete_after=5)
+
+    if not text:
+        return await ctx.send("❌ ფორმატი: `%register გუნდი თეგი @მენეჯერი`", delete_after=5)
 
     parts = text.split()
     manager = ctx.author
@@ -143,29 +157,38 @@ async def register(ctx, *, text: str = None):
         manager = ctx.message.mentions[0]
         parts = [p for p in parts if not (p.startswith('<@') and p.endswith('>'))]
 
-    if len(parts) < 2: return await ctx.send("❌ დაწერეთ გუნდის სახელი და თეგი!", delete_after=5)
+    if len(parts) < 2:
+        return await ctx.send("❌ დაწერეთ გუნდის სახელი და თეგი!", delete_after=5)
 
     team_tag = parts[-1]
     team_name = " ".join(parts[:-1])
-    data = get_scrim_data(scrim_key)
 
+    data = get_scrim_data(scrim_key)
+    
+    # ვამოწმებთ, უკვე ხომ არ არის რეგისტრირებული
     if any(t['manager_id'] == manager.id for t in data["teams"] + data["waitlist"]):
         return await ctx.send(f"⚠️ {manager.display_name} უკვე რეგისტრირებულია!", delete_after=5)
 
     new_team = {'name': team_name, 'tag': team_tag, 'manager_id': manager.id, 'confirmed': False}
     
+    # ლოგიკა: თუ არის ადგილი მთავარ სლოტებში (22-მდე)
     if len(data["teams"]) < 22:
         data["teams"].append(new_team)
         await manage_roles(manager, scrim_key, 'main')
         await ctx.message.add_reaction("✅")
+        if is_waitlist_reg:
+            await ctx.send(f"🎉 {team_name} მოხვდით მთავარ სლოტებში!", delete_after=10)
     else:
-        data["waitlist"].append(new_team)
-        await manage_roles(manager, scrim_key, 'wait')
-        await ctx.message.add_reaction("⏳")
+        # თუ მთავარი სლოტები სავსეა, მხოლოდ მაშინ მიდის ვეითლისტში (თუ ჩვეულებრივი რეგისტრაციაა)
+        if not is_waitlist_reg:
+            data["waitlist"].append(new_team)
+            await manage_roles(manager, scrim_key, 'wait')
+            await ctx.message.add_reaction("⏳")
+        else:
+            return await ctx.send("❌ მთავარი სლოტები უკვე შეივსო!", delete_after=5)
 
     save_scrim_data(scrim_key, data)
     await update_all_displays(scrim_key)
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def reset(ctx):
