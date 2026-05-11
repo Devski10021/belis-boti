@@ -123,28 +123,14 @@ async def render_embed(channel_id, title, scrim_key):
         await msg.add_reaction("✅")
         await msg.add_reaction("❌")
 
-# --- ივენთები ---
-
-@bot.event
-async def on_ready():
-    logger.info(f'✅ ბოტი ჩაირთო: {bot.user.name}')
-    if not check_deadline.is_running(): check_deadline.start()
+# --- ბრძანებები ---
 
 @bot.command()
 async def register(ctx, *, text: str = None):
-    scrim_key = None
-    is_waitlist_reg = False
-    
-    for k, v in SCRIMS.items():
-        if ctx.channel.id == v["reg_channel"]:
-            scrim_key = k
-            break
-        elif ctx.channel.id == v["wait_channel"]:
-            scrim_key = k
-            is_waitlist_reg = True
-            break
-            
+    scrim_key = next((k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["wait_channel"]]), None)
     if not scrim_key: return
+
+    is_waitlist_reg = ctx.channel.id == SCRIMS[scrim_key]["wait_channel"]
 
     if not text:
         return await ctx.send("❌ ფორმატი: `%register გუნდი თეგი @მენეჯერი`", delete_after=5)
@@ -169,10 +155,10 @@ async def register(ctx, *, text: str = None):
     
     if len(data["teams"]) < 22:
         data["teams"].append(new_team)
+        slot_num = len(data["teams"]) + 1
         await manage_roles(manager, scrim_key, 'main')
         await ctx.message.add_reaction("✅")
-        if is_waitlist_reg:
-            await ctx.send(f"🎉 {team_name} მოხვდით მთავარ სლოტებში!", delete_after=10)
+        await ctx.send(f"✅ **{team_name}** დარეგისტრირდა სლოტზე **#{slot_num:02d}**", delete_after=5)
     else:
         if not is_waitlist_reg:
             data["waitlist"].append(new_team)
@@ -183,6 +169,48 @@ async def register(ctx, *, text: str = None):
 
     save_scrim_data(scrim_key, data)
     await update_all_displays(scrim_key)
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def edit(ctx, manager: discord.Member, *, new_info: str):
+    """გუნდის ედიტირება: %edit @მენეჯერი ახალისახელი თეგი"""
+    scrim_key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
+    if not scrim_key:
+        return await ctx.send("❌ გამოიყენეთ რეგისტრაციის ჩანელში!")
+
+    parts = new_info.split()
+    if len(parts) < 2:
+        return await ctx.send("❌ ფორმატი: `%edit @მენეჯერი ახალისახელი თეგი`")
+
+    new_tag = parts[-1]
+    new_name = " ".join(parts[:-1])
+    
+    data = get_scrim_data(scrim_key)
+    found = False
+
+    # ვეძებთ სლოტებში
+    for team in data["teams"]:
+        if team["manager_id"] == manager.id:
+            team["name"] = new_name
+            team["tag"] = new_tag
+            found = True
+            break
+    
+    # თუ სლოტებში არაა, ვეძებთ ვეითლისტში
+    if not found:
+        for team in data["waitlist"]:
+            if team["manager_id"] == manager.id:
+                team["name"] = new_name
+                team["tag"] = new_tag
+                found = True
+                break
+
+    if found:
+        save_scrim_data(scrim_key, data)
+        await update_all_displays(scrim_key)
+        await ctx.send(f"✅ გუნდის მონაცემები განახლდა <@{manager.id}>-სთვის!")
+    else:
+        await ctx.send("❌ ეს მენეჯერი ვერ მოიძებნა სიაში.")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -198,6 +226,8 @@ async def reset(ctx):
     save_scrim_data(scrim_key, {"teams": [], "waitlist": []})
     await update_all_displays(scrim_key)
     await ctx.send(f"✅ {SCRIMS[scrim_key]['name']} წარმატებით განულდა!", delete_after=10)
+
+# --- ივენთები ---
 
 @bot.event
 async def on_raw_reaction_add(payload):
@@ -248,7 +278,6 @@ async def check_deadline():
             data = get_scrim_data(key)
             changed = False
             
-            # ვიღებთ სერვერს რეგისტრაციის ჩანელის მიხედვით
             reg_channel = bot.get_channel(cfg["reg_channel"])
             if not reg_channel: continue
             guild = reg_channel.guild
