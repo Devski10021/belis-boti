@@ -43,7 +43,7 @@ SCRIMS = {
         "wait_channel": 1503325883182747742,
         "role_id": 1503327762109304863,
         "wait_role_id": 1503328170311548949,
-        "color": 0xFFD700 # Gold
+        "color": 0xFFD700 
     },
     "scrim_00": {
         "name": "ELITE 00:30 SCRIMS",
@@ -52,7 +52,7 @@ SCRIMS = {
         "wait_channel": 1503327364749459506,
         "role_id": 1503327805897707591,
         "wait_role_id": 1503328171884412978,
-        "color": 0x00BFFF # DeepSkyBlue
+        "color": 0x00BFFF 
     }
 }
 
@@ -92,50 +92,45 @@ async def apply_roles(member, scrim_key, action):
     except Exception as e:
         logger.warning(f"Role change failed for {member.name}: {e}")
 
-# ─── EMBED BUILDERS (The Beauty Part) ────────────────────────────────────────
+# ─── EMBED BUILDERS ──────────────────────────────────────────────────────────
 def create_main_embed(scrim_key, data, guild):
     cfg = SCRIMS[scrim_key]
     teams = data.get("teams", [])
     vips = data.get("vips", {})
     
-    # Header logic
     status_icon = "🟢" if data.get("status") == "OPEN" else "🔴"
     embed = discord.Embed(
         title=f"🏆 {cfg['name']}",
         description=(
             f"**{status_icon} Status:** `{data.get('status', 'OPEN')}`\n"
-            f"**👥 Slots:** `{len(teams) + len(vips)}/25` (Admin Incl.)\n"
+            f"**👥 Slots:** `{len(teams) + len(vips) + 1}/25` (Admin Incl.)\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━"
         ),
         color=cfg["color"],
         timestamp=datetime.utcnow()
     )
 
-    def get_slot_text(slot_num, team_list, start_idx):
-        idx = slot_num - 2 # Offset for Admin slot 1
+    def get_slot_text(slot_num, team_list):
+        idx = slot_num - 2 
         if idx < len(team_list):
             t = team_list[idx]
             status = CONFIRM_EMOJI if t.get("confirmed") else "⏳"
-            m = guild.get_member(t['manager_id'])
-            m_name = m.display_name if m else "Unknown"
-            return f"{status} **Slot {slot_num:02d}:** {t['name']} `[{t['tag']}]`\n└ *{m_name}*"
+            # Mentions ლურჯად რომ გამოჩნდეს
+            return f"{status} **Slot {slot_num:02d}:** {t['name']} `[{t['tag']}]`\n└ <@{t['manager_id']}>"
         return f"{EMPTY_SLOT} **Slot {slot_num:02d}:** *Available*"
 
-    # Column 1: Slots 1-13
     col1 = [f"{ADMIN_SLOT} **Slot 01:** `ELITE HOST`"]
     for i in range(2, 14):
-        col1.append(get_slot_text(i, teams, 0))
+        col1.append(get_slot_text(i, teams))
 
-    # Column 2: Slots 14-25
     col2 = []
     for i in range(14, 24):
-        col2.append(get_slot_text(i, teams, 0))
+        col2.append(get_slot_text(i, teams))
     
-    # VIP Slots
     for i in ["24", "25"]:
         v = vips.get(i)
         if v:
-            col2.append(f"{VIP_EMOJI} **Slot {i}:** {v['name']} `[{v['tag']}]`")
+            col2.append(f"{VIP_EMOJI} **Slot {i}:** {v['name']} `[{v['tag']}]` \n└ <@{v['manager_id']}>")
         else:
             col2.append(f"🔹 **Slot {i}:** *VIP Reservation*")
 
@@ -143,7 +138,7 @@ def create_main_embed(scrim_key, data, guild):
     embed.add_field(name="󠂪", value="\n".join(col2), inline=True)
     
     embed.set_author(name="Belis Scrim Management", icon_url=bot.user.avatar.url if bot.user.avatar else None)
-    embed.set_footer(text="React ✅ to confirm or ❌ to leave • Auto-update active")
+    embed.set_footer(text="React ✅ to confirm or ❌ to leave")
     return embed
 
 def create_wait_embed(scrim_key, data):
@@ -158,11 +153,10 @@ def create_wait_embed(scrim_key, data):
     if wl:
         desc = ""
         for i, t in enumerate(wl):
-            desc += f"`#{i+1:02d}` **{t['name']}** `[{t['tag']}]`\n"
+            desc += f"`#{i+1:02d}` **{t['name']}** `[{t['tag']}]` — <@{t['manager_id']}>\n"
         embed.description = desc
     else:
         embed.description = "```diff\n- No teams in waitlist\n```"
-    
     return embed
 
 # ─── UPDATE LOGIC ─────────────────────────────────────────────────────────────
@@ -170,7 +164,6 @@ async def refresh_displays(scrim_key, guild):
     cfg = SCRIMS[scrim_key]
     data = get_data(scrim_key)
     
-    # Slot Channel
     slot_ch = bot.get_channel(cfg["slot_channel"])
     if slot_ch:
         try:
@@ -182,7 +175,6 @@ async def refresh_displays(scrim_key, guild):
             await msg.add_reaction(CANCEL_EMOJI)
         except Exception as e: logger.error(f"Display error: {e}")
 
-    # Waitlist Channel
     wait_ch = bot.get_channel(cfg["wait_channel"])
     if wait_ch:
         try:
@@ -201,40 +193,33 @@ async def on_raw_reaction_add(payload):
             user = guild.get_member(payload.user_id)
             data = get_data(key)
             
-            # Check if user is a manager of any team in this scrim
             user_team_idx = next((i for i, t in enumerate(data["teams"]) if t["manager_id"] == payload.user_id), None)
             is_admin = user.guild_permissions.administrator
             
             msg = await bot.get_channel(payload.channel_id).fetch_message(payload.message_id)
             
-            # 1. Permission Check
             if user_team_idx is None and not is_admin:
                 await msg.remove_reaction(payload.emoji, user)
                 return
 
             changed = False
-            
-            # 2. Confirm Logic
             if str(payload.emoji) == CONFIRM_EMOJI:
                 if user_team_idx is not None:
                     if not data["teams"][user_team_idx]["confirmed"]:
                         data["teams"][user_team_idx]["confirmed"] = True
                         changed = True
-                elif is_admin: # Admins confirm the next unconfirmed
+                elif is_admin:
                     for t in data["teams"]:
                         if not t["confirmed"]:
                             t["confirmed"] = True
                             changed = True
                             break
 
-            # 3. Cancel/Leave Logic
             elif str(payload.emoji) == CANCEL_EMOJI:
                 if user_team_idx is not None:
-                    removed = data["teams"].pop(user_team_idx)
+                    data["teams"].pop(user_team_idx)
                     await apply_roles(user, key, "none")
                     changed = True
-                    
-                    # Waitlist Promotion
                     if data["waitlist"]:
                         promo = data["waitlist"].pop(0)
                         data["teams"].append(promo)
@@ -247,44 +232,47 @@ async def on_raw_reaction_add(payload):
                 save_data(key, data)
                 await refresh_displays(key, guild)
 
-# ─── COMMANDS ─────────────────────────────────────────────────────────────────
+# ─── UPDATED REGISTER COMMAND ─────────────────────────────────────────────────
 @bot.command(name="register", aliases=["reg"])
-async def register(ctx, clan_name: str, clan_tag: str):
-    """Usage: %register "Clan Name" TAG"""
+async def register(ctx, clan_name: str, clan_tag: str, manager: discord.Member = None):
+    """Usage: %register "Clan Name" TAG [@Manager]"""
     key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
     if not key: return
 
     data = get_data(key)
     if data["status"] != "OPEN":
-        return await ctx.send("❌ Registration is currently **CLOSED**.", delete_after=5)
+        return await ctx.send("❌ Registration is currently **CLOSED**.")
 
-    # Prevent double registration
-    if any(t["manager_id"] == ctx.author.id for t in data["teams"]) or \
-       any(t["manager_id"] == ctx.author.id for t in data["waitlist"]):
-        return await ctx.send("❌ You are already registered for this session.", delete_after=5)
+    # თუ ადმინმა მენეჯერი მონიშნა, იმას ვიყენებთ, თუ არა – ავტორს.
+    target_manager = manager if manager else ctx.author
+
+    if any(t["manager_id"] == target_manager.id for t in data["teams"]) or \
+       any(t["manager_id"] == target_manager.id for t in data["waitlist"]):
+        return await ctx.send(f"❌ {target_manager.display_name} is already registered.")
 
     new_team = {
         "name": clan_name,
         "tag": clan_tag.upper(),
-        "manager_id": ctx.author.id,
+        "manager_id": target_manager.id,
         "confirmed": False,
         "time": datetime.utcnow().isoformat()
     }
 
     if len(data["teams"]) < 22:
         data["teams"].append(new_team)
-        await apply_roles(ctx.author, key, "main")
-        msg = f"✅ **{clan_name}** is registered! Check <#{SCRIMS[key]['slot_channel']}>"
+        await apply_roles(target_manager, key, "main")
+        msg = f"✅ **{clan_name}** is registered for <@{target_manager.id}>!"
     else:
         data["waitlist"].append(new_team)
-        await apply_roles(ctx.author, key, "wait")
-        msg = f"📋 **{clan_name}** added to Waitlist! (Pos: {len(data['waitlist'])})"
+        await apply_roles(target_manager, key, "wait")
+        msg = f"📋 **{clan_name}** added to Waitlist for <@{target_manager.id}>!"
 
     save_data(key, data)
     await refresh_displays(key, ctx.guild)
-    await ctx.message.delete()
-    await ctx.send(msg, delete_after=10)
+    # აღარ ვშლით მესიჯებს, რომ ჩატში დარჩეს
+    await ctx.send(msg)
 
+# ─── ADMIN COMMANDS ──────────────────────────────────────────────────────────
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def open(ctx):
@@ -307,24 +295,9 @@ async def close(ctx):
     await refresh_displays(key, ctx.guild)
     await ctx.send("🔒 Registration is now **CLOSED**.")
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def reset(ctx):
-    key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
-    if not key: return
-    save_data(key, {"teams": [], "waitlist": [], "vips": {}, "status": "OPEN"})
-    await refresh_displays(key, ctx.guild)
-    await ctx.send("🔄 Scrim data has been fully reset.")
-
-# ─── ON READY ─────────────────────────────────────────────────────────────────
 @bot.event
 async def on_ready():
-    print(f"""
-    ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-    ┃  SYSTEM: {bot.user.name} IS ONLINE      ┃
-    ┃  STATUS: MONITORING SCRIM CHANNELS       ┃
-    ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-    """)
+    print(f"SYSTEM: {bot.user.name} IS ONLINE")
     logger.info(f"Connected as {bot.user}")
 
 bot.run(os.getenv('DISCORD_TOKEN'))
