@@ -169,23 +169,24 @@ async def register(ctx, *, text: str = None):
 
     save_scrim_data(scrim_key, data)
     await update_all_displays(scrim_key)
-
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def edit(ctx, manager: discord.Member, *, new_info: str):
-    """გუნდის ედიტირება: %edit @მენეჯერი ახალისახელი თეგი"""
-    scrim_key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
-    if not scrim_key:
-        return await ctx.send("❌ გამოიყენეთ რეგისტრაციის ჩანელში!")
+async def edit(ctx, scrim_type: str, manager: discord.Member, *, new_info: str):
+    """
+    გამოყენება: %edit scrim_22 @მენეჯერი ახალი_სახელი თეგი
+    ან: %edit scrim_00 @მენეჯერი ახალი_სახელი თეგი
+    """
+    if scrim_type not in SCRIMS:
+        return await ctx.send("❌ არასწორი სკრიმის ტიპი! გამოიყენე `scrim_22` ან `scrim_00`", delete_after=10)
 
     parts = new_info.split()
     if len(parts) < 2:
-        return await ctx.send("❌ ფორმატი: `%edit @მენეჯერი ახალისახელი თეგი`")
+        return await ctx.send("❌ ფორმატი: `%edit scrim_22 @მენეჯერი სახელი თეგი`", delete_after=10)
 
     new_tag = parts[-1]
     new_name = " ".join(parts[:-1])
     
-    data = get_scrim_data(scrim_key)
+    data = get_scrim_data(scrim_type)
     found = False
 
     # ვეძებთ სლოტებში
@@ -206,11 +207,13 @@ async def edit(ctx, manager: discord.Member, *, new_info: str):
                 break
 
     if found:
-        save_scrim_data(scrim_key, data)
-        await update_all_displays(scrim_key)
-        await ctx.send(f"✅ გუნდის მონაცემები განახლდა <@{manager.id}>-სთვის!")
+        save_scrim_data(scrim_type, data)
+        await update_all_displays(scrim_type)
+        await ctx.send(f"✅ გუნდის მონაცემები განახლდა <@{manager.id}>-სთვის!", delete_after=10)
+        try: await ctx.message.delete() # ბრძანების წაშლა სისუფთავისთვის
+        except: pass
     else:
-        await ctx.send("❌ ეს მენეჯერი ვერ მოიძებნა სიაში.")
+        await ctx.send("❌ ეს მენეჯერი ვერ მოიძებნა ამ სკრიმის სიაში.", delete_after=10)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
