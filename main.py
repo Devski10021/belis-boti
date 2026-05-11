@@ -119,14 +119,17 @@ def create_main_embed(scrim_key, data, guild):
             return f"{status} **Slot {slot_num:02d}:** {t['name']} `[{t['tag']}]`\n└ <@{t['manager_id']}>"
         return f"{EMPTY_SLOT} **Slot {slot_num:02d}:** *Available*"
 
+    # Column 1: Slots 1-13
     col1 = [f"{ADMIN_SLOT} **Slot 01:** `ELITE HOST`"]
     for i in range(2, 14):
         col1.append(get_slot_text(i, teams))
 
+    # Column 2: Slots 14-25
     col2 = []
     for i in range(14, 24):
         col2.append(get_slot_text(i, teams))
     
+    # VIP Slots
     for i in ["24", "25"]:
         v = vips.get(i)
         if v:
@@ -138,7 +141,7 @@ def create_main_embed(scrim_key, data, guild):
     embed.add_field(name="󠂪", value="\n".join(col2), inline=True)
     
     embed.set_author(name="Belis Scrim Management", icon_url=bot.user.avatar.url if bot.user.avatar else None)
-    embed.set_footer(text="React ✅ to confirm or ❌ to leave")
+    embed.set_footer(text="React ✅ to confirm or ❌ to leave • Auto-update active")
     return embed
 
 def create_wait_embed(scrim_key, data):
@@ -164,23 +167,25 @@ async def refresh_displays(scrim_key, guild):
     cfg = SCRIMS[scrim_key]
     data = get_data(scrim_key)
     
+    # Slot Channel
     slot_ch = bot.get_channel(cfg["slot_channel"])
     if slot_ch:
         try:
-            await slot_ch.purge(limit=10, check=lambda m: m.author == bot.user)
+            await slot_ch.purge(limit=15, check=lambda m: m.author == bot.user)
             emb = create_main_embed(scrim_key, data, guild)
             msg = await slot_ch.send(embed=emb)
             last_msg_ids[scrim_key] = msg.id
             await msg.add_reaction(CONFIRM_EMOJI)
             await msg.add_reaction(CANCEL_EMOJI)
-        except Exception as e: logger.error(f"Display error: {e}")
+        except Exception as e: logger.error(f"Slot Refresh error: {e}")
 
+    # Waitlist Channel
     wait_ch = bot.get_channel(cfg["wait_channel"])
     if wait_ch:
         try:
-            await wait_ch.purge(limit=10, check=lambda m: m.author == bot.user)
+            await wait_ch.purge(limit=15, check=lambda m: m.author == bot.user)
             await wait_ch.send(embed=create_wait_embed(scrim_key, data))
-        except Exception as e: logger.error(f"Waitlist display error: {e}")
+        except Exception as e: logger.error(f"Wait Refresh error: {e}")
 
 # ─── CORE EVENTS ──────────────────────────────────────────────────────────────
 @bot.event
@@ -232,7 +237,7 @@ async def on_raw_reaction_add(payload):
                 save_data(key, data)
                 await refresh_displays(key, guild)
 
-# ─── UPDATED REGISTER COMMAND ─────────────────────────────────────────────────
+# ─── COMMANDS ─────────────────────────────────────────────────────────────────
 @bot.command(name="register", aliases=["reg"])
 async def register(ctx, clan_name: str, clan_tag: str, manager: discord.Member = None):
     """Usage: %register "Clan Name" TAG [@Manager]"""
@@ -243,7 +248,6 @@ async def register(ctx, clan_name: str, clan_tag: str, manager: discord.Member =
     if data["status"] != "OPEN":
         return await ctx.send("❌ Registration is currently **CLOSED**.")
 
-    # თუ ადმინმა მენეჯერი მონიშნა, იმას ვიყენებთ, თუ არა – ავტორს.
     target_manager = manager if manager else ctx.author
 
     if any(t["manager_id"] == target_manager.id for t in data["teams"]) or \
@@ -251,10 +255,8 @@ async def register(ctx, clan_name: str, clan_tag: str, manager: discord.Member =
         return await ctx.send(f"❌ {target_manager.display_name} is already registered.")
 
     new_team = {
-        "name": clan_name,
-        "tag": clan_tag.upper(),
-        "manager_id": target_manager.id,
-        "confirmed": False,
+        "name": clan_name, "tag": clan_tag.upper(),
+        "manager_id": target_manager.id, "confirmed": False,
         "time": datetime.utcnow().isoformat()
     }
 
@@ -269,18 +271,27 @@ async def register(ctx, clan_name: str, clan_tag: str, manager: discord.Member =
 
     save_data(key, data)
     await refresh_displays(key, ctx.guild)
-    # აღარ ვშლით მესიჯებს, რომ ჩატში დარჩეს
     await ctx.send(msg)
 
-# ─── ADMIN COMMANDS ──────────────────────────────────────────────────────────
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def reset(ctx):
+    """სრულად ასუფთავებს მიმდინარე სკრიმს"""
+    key = next((k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["slot_channel"]]), None)
+    if not key:
+        return await ctx.send("❌ გამოიყენე ეს ბრძანება რეგისტრაციის ან სლოტების არხში!")
+    
+    empty_data = {"teams": [], "waitlist": [], "vips": {}, "status": "OPEN"}
+    save_data(key, empty_data)
+    await refresh_displays(key, ctx.guild)
+    await ctx.send(f"🔄 **{SCRIMS[key]['name']}** სრულად გასუფთავდა!")
+
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def open(ctx):
     key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
     if not key: return
-    data = get_data(key)
-    data["status"] = "OPEN"
-    save_data(key, data)
+    data = get_data(key); data["status"] = "OPEN"; save_data(key, data)
     await refresh_displays(key, ctx.guild)
     await ctx.send("🔓 Registration is now **OPEN**.")
 
@@ -289,15 +300,19 @@ async def open(ctx):
 async def close(ctx):
     key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
     if not key: return
-    data = get_data(key)
-    data["status"] = "CLOSED"
-    save_data(key, data)
+    data = get_data(key); data["status"] = "CLOSED"; save_data(key, data)
     await refresh_displays(key, ctx.guild)
     await ctx.send("🔒 Registration is now **CLOSED**.")
 
+# ─── ON READY ─────────────────────────────────────────────────────────────────
 @bot.event
 async def on_ready():
-    print(f"SYSTEM: {bot.user.name} IS ONLINE")
+    print(f"""
+    ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+    ┃  SYSTEM: {bot.user.name} IS ONLINE      ┃
+    ┃  STATUS: READY TO MANAGE SCRIMS          ┃
+    ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+    """)
     logger.info(f"Connected as {bot.user}")
 
 bot.run(os.getenv('DISCORD_TOKEN'))
