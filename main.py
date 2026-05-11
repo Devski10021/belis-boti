@@ -1,27 +1,21 @@
 import discord
-from discord.ext import commands, tasks
-from datetime import datetime
-import pytz
+from discord.ext import commands
 import os
 import logging
 import certifi
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
-# ლოგირება
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 load_dotenv()
 
-# --- MongoDB დაკავშირება ---
 MONGO_URL = os.getenv('MONGO_URL')
 cluster = MongoClient(MONGO_URL, tlsCAFile=certifi.where())
 db = cluster["belis_scrims"]
 collection = db["storage"]
 
-# --- კონფიგურაცია ---
-TOTAL_SLOTS = 22 
+VIP_EMOJI = "<:diamond:1390948554956341301>"
 
 SCRIMS = {
     "scrim_22": {
@@ -29,278 +23,510 @@ SCRIMS = {
         "reg_channel": 1503324709557895288,
         "slot_channel": 1503325306285588510,
         "wait_channel": 1503325883182747742,
-        "id_pass_channel": 1503325459167969330,
         "role_id": 1503327762109304863,
         "wait_role_id": 1503328170311548949,
-        "deadline_h": 19, "deadline_m": 30
     },
     "scrim_00": {
         "name": "00:30 Scrim",
         "reg_channel": 1503327037832691832,
         "slot_channel": 1503327123337904189,
         "wait_channel": 1503327364749459506,
-        "id_pass_channel": 1503327196880703659,
         "role_id": 1503327805897707591,
         "wait_role_id": 1503328171884412978,
-        "deadline_h": 22, "deadline_m": 30
     }
 }
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-intents.reactions = True
-
 bot = commands.Bot(command_prefix="%", intents=intents)
 last_msg_ids = {}
 
-# --- დამხმარე ფუნქციები ---
+
+# ─── DATABASE ────────────────────────────────────────────────────────────────
 
 def get_scrim_data(scrim_key):
     res = collection.find_one({"_id": scrim_key})
     if res:
-        return {"teams": res.get("teams", []), "waitlist": res.get("waitlist", [])}
-    return {"teams": [], "waitlist": []}
+        return {
+            "teams": res.get("teams", []),
+            "waitlist": res.get("waitlist", []),
+            "vips": res.get("vips", {})
+        }
+    return {"teams": [], "waitlist": [], "vips": {}}
+
 
 def save_scrim_data(scrim_key, data):
     collection.update_one({"_id": scrim_key}, {"$set": data}, upsert=True)
 
+
+# ─── ROLES ────────────────────────────────────────────────────────────────────
+
 async def manage_roles(member, scrim_key, status):
-    if not member: return
+    if not member or not isinstance(member, discord.Member):
+        return
     cfg = SCRIMS[scrim_key]
-    main_role = member.guild.get_role(cfg["role_id"])
-    wait_role = member.guild.get_role(cfg["wait_role_id"])
-    
+    r_main = member.guild.get_role(cfg["role_id"])
+    r_wait = member.guild.get_role(cfg["wait_role_id"])
     try:
         if status == 'main':
-            if wait_role and wait_role in member.roles: await member.remove_roles(wait_role)
-            if main_role: await member.add_roles(main_role)
+            if r_wait and r_wait in member.roles:
+                await member.remove_roles(r_wait)
+            if r_main:
+                await member.add_roles(r_main)
         elif status == 'wait':
-            if main_role and main_role in member.roles: await member.remove_roles(main_role)
-            if wait_role: await member.add_roles(wait_role)
+            if r_main and r_main in member.roles:
+                await member.remove_roles(r_main)
+            if r_wait:
+                await member.add_roles(r_wait)
         elif status == 'none':
-            if main_role and main_role in member.roles: await member.remove_roles(main_role)
-            if wait_role and wait_role in member.roles: await member.remove_roles(wait_role)
+            if r_main and r_main in member.roles:
+                await member.remove_roles(r_main)
+            if r_wait and r_wait in member.roles:
+                await member.remove_roles(r_wait)
     except Exception as e:
-        logger.error(f"Error managing roles for {member.display_name}: {e}")
+        logger.warning(f"Role manage error: {e}")
+
+
+# ─── DISPLAY ──────────────────────────────────────────────────────────────────
+
+def build_team_list_embed(scrim_key, data):
+    cfg = SCRIMS[scrim_key]
+    teams = data.get("teams", [])
+    filled = len(teams)
+    vips = data.get("vips", {})
+    vip_filled = sum(1 for s in ["24","25"] if vips.get(s))
+    total_filled = filled + vip_filled
+
+    embed = discord.Embed(
+        title=f"🏆  {cfg['name']}  —  TEAM LIST",
+        color=0xF1C40F
+    )
+    embed.description = f"> 📊  **{total_filled + 1}/25** სლოტი დაკავებულია"
+
+    # ── Left column: slots 01–13 ──
+    left = []
+    left.append(f"🔒 `01` ⚜️ **ADMIN**")
+    for i in range(2, 14):
+        idx = i - 2
+        _slot_line(left, i, idx, teams)
+
+    # ── Right column: slots 14–25 ──
+    right = []
+    for i in range(14, 24):
+        idx = i - 2
+        _slot_line(right, i, idx, teams)
+
+    # VIP slots
+    for slot_num in [24, 25]:
+        v = vips.get(str(slot_num))
+        if v:
+            icon = "✅" if v.get("confirmed") else "⏳"
+            right.append(f"{icon} {VIP_EMOJI} **{v['name']}** `{v['tag']}`")
+        else:
+            right.append(f"🔷 {VIP_EMOJI} *VIP available*")
+
+    embed.add_field(name="​", value="\n".join(left), inline=True)
+    embed.add_field(name="​", value="\n".join(right), inline=True)
+    embed.set_footer(text=f"react ✅ confirm  •  ❌ unconfirm  •  %register clan tag @manager")
+    return embed
+
+
+def _slot_line(lines, slot_num, idx, teams):
+    """Append one slot line to the given list."""
+    n = f"`{slot_num:02d}`"
+    if idx < len(teams):
+        tm = teams[idx]
+        icon = "✅" if tm.get("confirmed") else "⏳"
+        lines.append(f"{icon} {n} **{tm['name']}** `{tm['tag']}`")
+    else:
+        lines.append(f"◻️ {n} *— open —*")
+
+
+def build_waitlist_embed(scrim_key, data):
+    cfg = SCRIMS[scrim_key]
+    embed = discord.Embed(
+        title=f"📋  {cfg['name']}  —  WAITLIST",
+        color=0x5865F2
+    )
+    wl = data.get("waitlist", [])
+    if wl:
+        lines = []
+        for i, x in enumerate(wl):
+            lines.append(f"⏳ `{i+1:02d}` **{x['name']}** `{x['tag']}`")
+        embed.description = "\n".join(lines)
+        embed.set_footer(text="სლოტი გათავისუფლდება → პირველი ტიმი ავტომატურად ჩადის")
+    else:
+        embed.description = "```\nვეითლისტი ცარიელია\n```"
+        embed.set_footer(text="სლოტები გაივსება → ვეითლისტი გაიხსნება")
+    return embed
+
 
 async def update_all_displays(scrim_key):
     cfg = SCRIMS[scrim_key]
-    await render_embed(cfg["slot_channel"], "TEAM LIST", scrim_key)
-    await render_embed(cfg["wait_channel"], "WAITLIST", scrim_key)
-
-async def render_embed(channel_id, title, scrim_key):
-    channel = bot.get_channel(channel_id)
-    if not channel: return
-    try: 
-        await channel.purge(limit=15, check=lambda m: m.author == bot.user)
-    except: pass
-
     data = get_scrim_data(scrim_key)
-    cfg = SCRIMS[scrim_key]
-    embed = discord.Embed(title=f"🏆 {cfg['name']} - {title} 🏆", color=0xF1C40F if title == "TEAM LIST" else 0xE67E22)
-    content = "━━━━━━━━━━━━━━━━━━━━━━\n"
 
-    if title == "TEAM LIST":
-        content += "🆔 **01.** 🔒 **ADMIN / RESERVED**\n\n"
-        teams = data.get("teams", [])
-        for i, team in enumerate(teams, 2):
-            status_icon = "✅ " if team.get('confirmed') else "⏳ "
-            content += f"**{i:02d}.** {status_icon}**{team['name']}** [{team['tag']}]\n└ მენეჯერი: <@{team['manager_id']}>\n\n"
-        for i in range(len(teams) + 2, 26):
-            content += f"**{i:02d}.** --------------------------------\n"
-    else:
-        waitlist = data.get("waitlist", [])
-        if not waitlist: content += "*ჯერჯერობით ცარიელია...*"
-        else:
-            for i, team in enumerate(waitlist, 1):
-                content += f"**{i:02d}.** 📋 **{team['name']}** [{team['tag']}] - <@{team['manager_id']}>\n"
-
-    embed.description = content + "\n━━━━━━━━━━━━━━━━━━━━━━"
-    msg = await channel.send(embed=embed)
-    if title == "TEAM LIST":
+    # ── Team List channel ──
+    slot_ch = bot.get_channel(cfg["slot_channel"])
+    if slot_ch:
+        await slot_ch.purge(limit=10, check=lambda m: m.author == bot.user)
+        embed = build_team_list_embed(scrim_key, data)
+        msg = await slot_ch.send(embed=embed)
         last_msg_ids[scrim_key] = msg.id
         await msg.add_reaction("✅")
         await msg.add_reaction("❌")
 
-# --- ბრძანებები ---
+    # ── Waitlist channel ──
+    wait_ch = bot.get_channel(cfg["wait_channel"])
+    if wait_ch:
+        await wait_ch.purge(limit=10, check=lambda m: m.author == bot.user)
+        embed = build_waitlist_embed(scrim_key, data)
+        await wait_ch.send(embed=embed)
+
+
+# ─── COMMANDS ─────────────────────────────────────────────────────────────────
 
 @bot.command()
-async def register(ctx, *, text: str = None):
-    scrim_key = next((k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["wait_channel"]]), None)
-    if not scrim_key: return
+async def register(ctx, *, text=None):
+    """
+    %register <clan name> <clan tag> [@manager]
+    """
+    key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
+    if not key or not text:
+        return
 
-    is_waitlist_reg = ctx.channel.id == SCRIMS[scrim_key]["wait_channel"]
-
-    if not text:
-        return await ctx.send("❌ ფორმატი: `%register გუნდი თეგი @მენეჯერი`", delete_after=5)
-
-    parts = text.split()
-    manager = ctx.author
-    if ctx.message.mentions:
-        manager = ctx.message.mentions[0]
-        parts = [p for p in parts if not (p.startswith('<@') and p.endswith('>'))]
+    manager = ctx.message.mentions[0] if ctx.message.mentions else ctx.author
+    parts = [x for x in text.split() if not x.startswith('<@')]
 
     if len(parts) < 2:
-        return await ctx.send("❌ დაწერეთ გუნდის სახელი და თეგი!", delete_after=5)
+        await ctx.send("❌  გამოყენება: `%register <clan name> <clan tag> [@manager]`", delete_after=10)
+        return
 
-    team_tag = parts[-1]
-    team_name = " ".join(parts[:-1])
+    clan_tag = parts[-1]
+    clan_name = " ".join(parts[:-1])
+    data = get_scrim_data(key)
 
-    data = get_scrim_data(scrim_key)
-    if any(t['manager_id'] == manager.id for t in data["teams"] + data["waitlist"]):
-        return await ctx.send(f"⚠️ {manager.display_name} უკვე რეგისტრირებულია!", delete_after=5)
+    new_team = {
+        'name': clan_name,
+        'tag': clan_tag,
+        'manager_id': manager.id,
+        'confirmed': False
+    }
 
-    new_team = {'name': team_name, 'tag': team_tag, 'manager_id': manager.id, 'confirmed': False}
-    
     if len(data["teams"]) < 22:
         data["teams"].append(new_team)
-        slot_num = len(data["teams"]) + 1
-        await manage_roles(manager, scrim_key, 'main')
-        await ctx.message.add_reaction("✅")
-        await ctx.send(f"✅ **{team_name}** დარეგისტრირდა სლოტზე **#{slot_num:02d}**", delete_after=5)
+        await manage_roles(manager, key, 'main')
+        slot_num = len(data["teams"]) + 1  # +1 because slot 01 is admin
+        status_msg = f"✅  **{clan_name}** დარეგისტრირდა! სლოტი → **`{slot_num:02d}`**"
     else:
-        if not is_waitlist_reg:
-            data["waitlist"].append(new_team)
-            await manage_roles(manager, scrim_key, 'wait')
-            await ctx.message.add_reaction("⏳")
-        else:
-            return await ctx.send("❌ მთავარი სლოტები უკვე შეივსო!", delete_after=5)
+        data["waitlist"].append(new_team)
+        await manage_roles(manager, key, 'wait')
+        wait_pos = len(data["waitlist"])
+        status_msg = f"📋  **{clan_name}** ვეითლისტშია! პოზიცია → **`{wait_pos}`**"
 
-    save_scrim_data(scrim_key, data)
-    await update_all_displays(scrim_key)
+    save_scrim_data(key, data)
+    await update_all_displays(key)
+    reply = await ctx.send(status_msg)
+    await ctx.message.delete(delay=5)
+    await reply.delete(delay=8)
+
+
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def edit(ctx, scrim_type: str, manager: discord.Member, *, new_info: str):
+async def setvip(ctx, slot: int, member: discord.Member, *, text):
     """
-    გამოყენება: %edit scrim_22 @მენეჯერი ახალი_სახელი თეგი
-    ან: %edit scrim_00 @მენეჯერი ახალი_სახელი თეგი
+    %setvip <24|25> @manager <clan name> <clan tag>
     """
-    if scrim_type not in SCRIMS:
-        return await ctx.send("❌ არასწორი სკრიმის ტიპი! გამოიყენე `scrim_22` ან `scrim_00`", delete_after=10)
+    key = next(
+        (k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["slot_channel"]]),
+        None
+    )
+    if not key or slot not in [24, 25]:
+        return
 
-    parts = new_info.split()
+    parts = text.split()
     if len(parts) < 2:
-        return await ctx.send("❌ ფორმატი: `%edit scrim_22 @მენეჯერი სახელი თეგი`", delete_after=10)
+        await ctx.send("❌  გამოყენება: `%setvip <24|25> @manager <clan name> <clan tag>`", delete_after=10)
+        return
 
-    new_tag = parts[-1]
-    new_name = " ".join(parts[:-1])
-    
-    data = get_scrim_data(scrim_type)
-    found = False
+    clan_tag = parts[-1]
+    clan_name = " ".join(parts[:-1])
+    data = get_scrim_data(key)
+    data["vips"][str(slot)] = {'name': clan_name, 'tag': clan_tag, 'manager_id': member.id}
+    save_scrim_data(key, data)
+    await manage_roles(member, key, 'main')
+    await update_all_displays(key)
+    reply = await ctx.send(f"✅  VIP სლოტი **{slot}** → **{clan_name}** [`{clan_tag}`]")
+    await reply.delete(delay=8)
 
-    # ვეძებთ სლოტებში
-    for team in data["teams"]:
-        if team["manager_id"] == manager.id:
-            team["name"] = new_name
-            team["tag"] = new_tag
-            found = True
-            break
-    
-    # თუ სლოტებში არაა, ვეძებთ ვეითლისტში
-    if not found:
-        for team in data["waitlist"]:
-            if team["manager_id"] == manager.id:
-                team["name"] = new_name
-                team["tag"] = new_tag
-                found = True
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def edit(ctx, *, text=None):
+    """
+    Edit any slot by slot number or by tagging the manager:
+
+    By slot number:
+      %edit <slot_number> <clan name> <clan tag> [@manager]
+
+    By manager:
+      %edit @manager <clan name> <clan tag>
+    """
+    key = next(
+        (k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["slot_channel"]]),
+        None
+    )
+    if not key or not text:
+        return
+
+    data = get_scrim_data(key)
+    parts = [x for x in text.split() if not x.startswith('<@')]
+    mentions = ctx.message.mentions
+    updated = False
+
+    # ── Mode 1: slot number provided ──
+    if parts and parts[0].isdigit():
+        slot_num = int(parts[0])
+        rest = parts[1:]
+        if len(rest) < 2:
+            await ctx.send("❌  გამოყენება: `%edit <slot> <clan name> <clan tag> [@manager]`", delete_after=10)
+            return
+
+        clan_tag = rest[-1]
+        clan_name = " ".join(rest[:-1])
+        new_manager_id = mentions[0].id if mentions else None
+
+        # VIP slots
+        if slot_num in [24, 25]:
+            if data["vips"].get(str(slot_num)):
+                data["vips"][str(slot_num)]["name"] = clan_name
+                data["vips"][str(slot_num)]["tag"] = clan_tag
+                if new_manager_id:
+                    data["vips"][str(slot_num)]["manager_id"] = new_manager_id
+                updated = True
+            else:
+                # Create new VIP entry if none exists
+                mgr_id = new_manager_id or ctx.author.id
+                data["vips"][str(slot_num)] = {
+                    'name': clan_name, 'tag': clan_tag, 'manager_id': mgr_id
+                }
+                updated = True
+
+        # Regular slots (slot 02 → index 0, slot 23 → index 21)
+        elif 2 <= slot_num <= 23:
+            idx = slot_num - 2
+            if idx < len(data["teams"]):
+                old_manager_id = data["teams"][idx]["manager_id"]
+                data["teams"][idx]["name"] = clan_name
+                data["teams"][idx]["tag"] = clan_tag
+                if new_manager_id:
+                    # Transfer role from old manager to new
+                    guild = ctx.guild
+                    old_member = guild.get_member(old_manager_id)
+                    new_member = guild.get_member(new_manager_id)
+                    if old_member:
+                        await manage_roles(old_member, key, 'none')
+                    if new_member:
+                        await manage_roles(new_member, key, 'main')
+                    data["teams"][idx]["manager_id"] = new_manager_id
+                updated = True
+
+    # ── Mode 2: manager mention provided ──
+    elif mentions:
+        target_id = mentions[0].id
+        if len(parts) < 2:
+            await ctx.send("❌  გამოყენება: `%edit @manager <clan name> <clan tag>`", delete_after=10)
+            return
+
+        clan_tag = parts[-1]
+        clan_name = " ".join(parts[:-1])
+
+        for t in data["teams"]:
+            if t["manager_id"] == target_id:
+                t["name"] = clan_name
+                t["tag"] = clan_tag
+                updated = True
+                break
+        if not updated:
+            for s in ["24", "25"]:
+                if data["vips"].get(s) and data["vips"][s]["manager_id"] == target_id:
+                    data["vips"][s]["name"] = clan_name
+                    data["vips"][s]["tag"] = clan_tag
+                    updated = True
+                    break
+
+    if updated:
+        save_scrim_data(key, data)
+        await update_all_displays(key)
+        reply = await ctx.send("✅  სლოტი განახლდა!")
+    else:
+        reply = await ctx.send("❌  სლოტი ვერ მოიძებნა.")
+
+    await ctx.message.delete(delay=5)
+    await reply.delete(delay=8)
+
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def remove(ctx, *, text=None):
+    """
+    Remove a team by slot number or manager mention, and auto-promote from waitlist.
+
+    %remove <slot_number>
+    %remove @manager
+    """
+    key = next(
+        (k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["slot_channel"]]),
+        None
+    )
+    if not key or not text:
+        return
+
+    data = get_scrim_data(key)
+    parts = text.split()
+    mentions = ctx.message.mentions
+    removed = False
+    removed_idx = None
+
+    # By slot number
+    if parts and parts[0].isdigit():
+        slot_num = int(parts[0])
+
+        if slot_num in [24, 25]:
+            if data["vips"].get(str(slot_num)):
+                old_mgr = ctx.guild.get_member(data["vips"][str(slot_num)]["manager_id"])
+                if old_mgr:
+                    await manage_roles(old_mgr, key, 'none')
+                del data["vips"][str(slot_num)]
+                removed = True
+        elif 2 <= slot_num <= 23:
+            idx = slot_num - 2
+            if idx < len(data["teams"]):
+                old_mgr = ctx.guild.get_member(data["teams"][idx]["manager_id"])
+                if old_mgr:
+                    await manage_roles(old_mgr, key, 'none')
+                data["teams"].pop(idx)
+                removed = True
+                removed_idx = idx
+
+    # By manager mention
+    elif mentions:
+        target_id = mentions[0].id
+        for i, t in enumerate(data["teams"]):
+            if t["manager_id"] == target_id:
+                old_mgr = ctx.guild.get_member(target_id)
+                if old_mgr:
+                    await manage_roles(old_mgr, key, 'none')
+                data["teams"].pop(i)
+                removed = True
+                removed_idx = i
                 break
 
-    if found:
-        save_scrim_data(scrim_type, data)
-        await update_all_displays(scrim_type)
-        await ctx.send(f"✅ გუნდის მონაცემები განახლდა <@{manager.id}>-სთვის!", delete_after=10)
-        try: await ctx.message.delete() # ბრძანების წაშლა სისუფთავისთვის
-        except: pass
+        if not removed:
+            for s in ["24", "25"]:
+                if data["vips"].get(s) and data["vips"][s]["manager_id"] == target_id:
+                    old_mgr = ctx.guild.get_member(target_id)
+                    if old_mgr:
+                        await manage_roles(old_mgr, key, 'none')
+                    del data["vips"][s]
+                    removed = True
+                    break
+
+    # Auto-promote from waitlist if a regular slot was freed
+    if removed and removed_idx is not None and data["waitlist"]:
+        promoted = data["waitlist"].pop(0)
+        # Insert at the freed position (or append if at end)
+        data["teams"].insert(removed_idx, promoted)
+        promo_member = ctx.guild.get_member(promoted["manager_id"])
+        if promo_member:
+            await manage_roles(promo_member, key, 'main')
+        logger.info(f"Auto-promoted {promoted['name']} from waitlist to slot {removed_idx + 2:02d}")
+
+    if removed:
+        save_scrim_data(key, data)
+        await update_all_displays(key)
+        reply = await ctx.send("✅  ტიმი წაიშალა" + (" და ვეითლისტიდან ავტომატურად ჩაისვა!" if removed_idx is not None and removed else "!"))
     else:
-        await ctx.send("❌ ეს მენეჯერი ვერ მოიძებნა ამ სკრიმის სიაში.", delete_after=10)
+        reply = await ctx.send("❌  სლოტი ვერ მოიძებნა.")
+
+    await ctx.message.delete(delay=5)
+    await reply.delete(delay=8)
+
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def reset(ctx):
-    scrim_key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
-    if not scrim_key: return
+    """Reset all registrations for this scrim."""
+    key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
+    if not key:
+        return
+    save_scrim_data(key, {"teams": [], "waitlist": [], "vips": {}})
+    await update_all_displays(key)
+    reply = await ctx.send("🔄  სკრიმი სრულად გაასუფთავდა!")
+    await ctx.message.delete(delay=3)
+    await reply.delete(delay=6)
 
-    data = get_scrim_data(scrim_key)
-    for team in data["teams"] + data["waitlist"]:
-        member = ctx.guild.get_member(team["manager_id"])
-        if member: await manage_roles(member, scrim_key, 'none')
 
-    save_scrim_data(scrim_key, {"teams": [], "waitlist": []})
-    await update_all_displays(scrim_key)
-    await ctx.send(f"✅ {SCRIMS[scrim_key]['name']} წარმატებით განულდა!", delete_after=10)
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def refresh(ctx):
+    """Force-refresh both display channels for this scrim."""
+    key = next(
+        (k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["slot_channel"], v["wait_channel"]]),
+        None
+    )
+    if not key:
+        return
+    await update_all_displays(key)
+    reply = await ctx.send("🔁  დისპლეი განახლდა!")
+    await reply.delete(delay=5)
 
-# --- ივენთები ---
+
+# ─── REACTION CONFIRM/UNCONFIRM ──────────────────────────────────────────────
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    if payload.user_id == bot.user.id: return
-    scrim_key = next((k for k, v in last_msg_ids.items() if payload.message_id == v), None)
-    if not scrim_key: return
-    
-    guild = bot.get_guild(payload.guild_id)
-    member = guild.get_member(payload.user_id)
-    data = get_scrim_data(scrim_key)
-    updated = False
+    if payload.user_id == bot.user.id:
+        return
 
-    if str(payload.emoji) == "✅":
-        for t in data["teams"]:
-            if t['manager_id'] == payload.user_id:
-                t['confirmed'] = True
-                updated = True
-                break
+    for scrim_key, cfg in SCRIMS.items():
+        if payload.channel_id == cfg["slot_channel"] and payload.message_id == last_msg_ids.get(scrim_key):
+            guild = bot.get_guild(payload.guild_id)
+            member = guild.get_member(payload.user_id)
+            if not member or not member.guild_permissions.administrator:
+                # Remove non-admin reactions
+                channel = bot.get_channel(payload.channel_id)
+                msg = await channel.fetch_message(payload.message_id)
+                await msg.remove_reaction(payload.emoji, member)
+                return
 
-    elif str(payload.emoji) == "❌":
-        team_to_remove = next((t for t in data["teams"] if t['manager_id'] == payload.user_id), None)
-        if team_to_remove:
-            data["teams"].remove(team_to_remove)
-            if member: await manage_roles(member, scrim_key, 'none')
-            if data["waitlist"]:
-                promoted = data["waitlist"].pop(0)
-                data["teams"].append(promoted)
-                promoted_member = guild.get_member(promoted["manager_id"])
-                if promoted_member: await manage_roles(promoted_member, scrim_key, 'main')
-            updated = True
-        else:
-            team_to_remove = next((t for t in data["waitlist"] if t['manager_id'] == payload.user_id), None)
-            if team_to_remove:
-                data["waitlist"].remove(team_to_remove)
-                if member: await manage_roles(member, scrim_key, 'none')
-                updated = True
-
-    if updated:
-        save_scrim_data(scrim_key, data)
-        await update_all_displays(scrim_key)
-
-@tasks.loop(minutes=1)
-async def check_deadline():
-    tz = pytz.timezone('Asia/Tbilisi')
-    now = datetime.now(tz)
-    for key, cfg in SCRIMS.items():
-        if now.hour == cfg["deadline_h"] and now.minute == cfg["deadline_m"]:
-            data = get_scrim_data(key)
+            data = get_scrim_data(scrim_key)
             changed = False
-            
-            reg_channel = bot.get_channel(cfg["reg_channel"])
-            if not reg_channel: continue
-            guild = reg_channel.guild
-            
-            for t in data["teams"][:]:
-                if not t.get('confirmed'):
-                    data["teams"].remove(t)
-                    member = guild.get_member(t["manager_id"])
-                    if member: await manage_roles(member, key, 'none')
-                    
-                    if data["waitlist"]:
-                        promoted = data["waitlist"].pop(0)
-                        data["teams"].append(promoted)
-                        promoted_member = guild.get_member(promoted["manager_id"])
-                        if promoted_member: await manage_roles(promoted_member, key, 'main')
-                    changed = True
-            
-            if changed:
-                save_scrim_data(key, data)
-                await update_all_displays(key)
 
-if __name__ == "__main__":
-    bot.run(os.getenv('DISCORD_TOKEN'))
+            if str(payload.emoji) == "✅":
+                for t in data["teams"]:
+                    if not t.get("confirmed"):
+                        t["confirmed"] = True
+                        changed = True
+                        break
+            elif str(payload.emoji) == "❌":
+                for t in reversed(data["teams"]):
+                    if t.get("confirmed"):
+                        t["confirmed"] = False
+                        changed = True
+                        break
+
+            if changed:
+                save_scrim_data(scrim_key, data)
+                await update_all_displays(scrim_key)
+            break
+
+
+# ─── READY ────────────────────────────────────────────────────────────────────
+
+@bot.event
+async def on_ready():
+    logger.info(f"✅ {bot.user} მზად არის!")
+
+
+bot.run(os.getenv('DISCORD_TOKEN'))
