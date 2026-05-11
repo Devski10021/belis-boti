@@ -22,7 +22,6 @@ collection = db["storage"]
 
 # --- კონფიგურაცია ---
 TOTAL_SLOTS = 22 
-GUILD_ID = 1255212608659787778
 
 SCRIMS = {
     "scrim_22": {
@@ -42,7 +41,7 @@ SCRIMS = {
         "wait_channel": 1503327364749459506,
         "id_pass_channel": 1503327196880703659,
         "role_id": 1503327805897707591,
-        "wait_role_id":1503328171884412978,
+        "wait_role_id": 1503328171884412978,
         "deadline_h": 22, "deadline_m": 30
     }
 }
@@ -67,6 +66,7 @@ def save_scrim_data(scrim_key, data):
     collection.update_one({"_id": scrim_key}, {"$set": data}, upsert=True)
 
 async def manage_roles(member, scrim_key, status):
+    if not member: return
     cfg = SCRIMS[scrim_key]
     main_role = member.guild.get_role(cfg["role_id"])
     wait_role = member.guild.get_role(cfg["wait_role_id"])
@@ -92,7 +92,8 @@ async def update_all_displays(scrim_key):
 async def render_embed(channel_id, title, scrim_key):
     channel = bot.get_channel(channel_id)
     if not channel: return
-    try: await channel.purge(limit=15, check=lambda m: m.author == bot.user)
+    try: 
+        await channel.purge(limit=15, check=lambda m: m.author == bot.user)
     except: pass
 
     data = get_scrim_data(scrim_key)
@@ -105,11 +106,9 @@ async def render_embed(channel_id, title, scrim_key):
         teams = data.get("teams", [])
         for i, team in enumerate(teams, 2):
             status_icon = "✅ " if team.get('confirmed') else "⏳ "
-            vip = "💎 **[VIP]** " if i >= 24 else ""
-            content += f"**{i:02d}.** {status_icon}{vip}**{team['name']}** [{team['tag']}]\n└ მენეჯერი: <@{team['manager_id']}>\n\n"
+            content += f"**{i:02d}.** {status_icon}**{team['name']}** [{team['tag']}]\n└ მენეჯერი: <@{team['manager_id']}>\n\n"
         for i in range(len(teams) + 2, 26):
-            lbl = "💎 VIP SLOT" if i >= 24 else "--------------------------------"
-            content += f"**{i:02d}.** {lbl}\n"
+            content += f"**{i:02d}.** --------------------------------\n"
     else:
         waitlist = data.get("waitlist", [])
         if not waitlist: content += "*ჯერჯერობით ცარიელია...*"
@@ -133,7 +132,6 @@ async def on_ready():
 
 @bot.command()
 async def register(ctx, *, text: str = None):
-    # ვამოწმებთ, არის თუ არა ეს რეგისტრაციის ან ვეითლისტის ჩანელი
     scrim_key = None
     is_waitlist_reg = False
     
@@ -164,14 +162,11 @@ async def register(ctx, *, text: str = None):
     team_name = " ".join(parts[:-1])
 
     data = get_scrim_data(scrim_key)
-    
-    # ვამოწმებთ, უკვე ხომ არ არის რეგისტრირებული
     if any(t['manager_id'] == manager.id for t in data["teams"] + data["waitlist"]):
         return await ctx.send(f"⚠️ {manager.display_name} უკვე რეგისტრირებულია!", delete_after=5)
 
     new_team = {'name': team_name, 'tag': team_tag, 'manager_id': manager.id, 'confirmed': False}
     
-    # ლოგიკა: თუ არის ადგილი მთავარ სლოტებში (22-მდე)
     if len(data["teams"]) < 22:
         data["teams"].append(new_team)
         await manage_roles(manager, scrim_key, 'main')
@@ -179,7 +174,6 @@ async def register(ctx, *, text: str = None):
         if is_waitlist_reg:
             await ctx.send(f"🎉 {team_name} მოხვდით მთავარ სლოტებში!", delete_after=10)
     else:
-        # თუ მთავარი სლოტები სავსეა, მხოლოდ მაშინ მიდის ვეითლისტში (თუ ჩვეულებრივი რეგისტრაციაა)
         if not is_waitlist_reg:
             data["waitlist"].append(new_team)
             await manage_roles(manager, scrim_key, 'wait')
@@ -235,7 +229,6 @@ async def on_raw_reaction_add(payload):
                 if promoted_member: await manage_roles(promoted_member, scrim_key, 'main')
             updated = True
         else:
-            # ვეითლისტიდან წაშლა
             team_to_remove = next((t for t in data["waitlist"] if t['manager_id'] == payload.user_id), None)
             if team_to_remove:
                 data["waitlist"].remove(team_to_remove)
@@ -254,16 +247,18 @@ async def check_deadline():
         if now.hour == cfg["deadline_h"] and now.minute == cfg["deadline_m"]:
             data = get_scrim_data(key)
             changed = False
-            guild = bot.get_guild(GUILD_ID)
             
-            # ვამოწმებთ სლოტებს: ვინც არ დაადასტურა, ვშლით
+            # ვიღებთ სერვერს რეგისტრაციის ჩანელის მიხედვით
+            reg_channel = bot.get_channel(cfg["reg_channel"])
+            if not reg_channel: continue
+            guild = reg_channel.guild
+            
             for t in data["teams"][:]:
                 if not t.get('confirmed'):
                     data["teams"].remove(t)
                     member = guild.get_member(t["manager_id"])
                     if member: await manage_roles(member, key, 'none')
                     
-                    # მაშინვე ვამატებთ ვეითლისტიდან ახალს
                     if data["waitlist"]:
                         promoted = data["waitlist"].pop(0)
                         data["teams"].append(promoted)
