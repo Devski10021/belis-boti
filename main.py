@@ -27,10 +27,11 @@ except Exception as e:
 
 # ─── CONSTANTS ────────────────────────────────────────────────────────────────
 # Application Emojis — როგორც display-ში, ასევე reactions-ში
-VIP_EMOJI       = "<:VIP_2:1503677407062917130>"
-CONFIRM_DISPLAY = "<:Red_Verified:1503686337415479337>"
-CANCEL_DISPLAY  = "<:verify_red_cross:1503686325226831943>"
-WAIT_DISPLAY    = "<:WAITLISTSF:1503687118302482562>"
+VIP_EMOJI        = "<a:loading_loading_loading:1503689198249574542>"   # loading — unconfirmed სლოტი
+VIP_SLOT_EMOJI   = "<:TDE_vip_black_idp:1503689111901311126>"          # VIP 24/25 სლოტი
+CONFIRM_DISPLAY  = "<:Red_Verified:1503686337415479337>"               # confirmed
+CANCEL_DISPLAY   = "<:verify_red_cross:1503686325226831943>"           # unconfirm icon (embed)
+WAIT_DISPLAY     = "<a:loading_loading_loading:1503689198249574542>"   # unconfirmed — loading
 
 REACT_CONFIRM = "<:Red_Verified:1503686337415479337>"
 REACT_CANCEL  = "<:verify_red_cross:1503686325226831943>"
@@ -110,72 +111,75 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
     vips  = data.get("vips", {})
 
     total_filled    = len(teams) + len(vips)
-    confirmed_count = sum(1 for t in teams if t.get("confirmed")) \
-                    + sum(1 for v in vips.values() if v.get("confirmed"))
+    confirmed_count = (sum(1 for t in teams if t.get("confirmed"))
+                     + sum(1 for v in vips.values() if v.get("confirmed")))
+    unconfirmed     = total_filled - confirmed_count
 
-    # Progress bar
+    # Progress bar (22 regular slots)
     filled_regular = len(teams)
-    bar_on  = round((filled_regular / 22) * 16)
-    bar_off = 16 - bar_on
-    bar     = "█" * bar_on + "░" * bar_off
+    bar_on  = round((filled_regular / 22) * 20)
+    bar_off = 20 - bar_on
+    bar     = "▰" * bar_on + "▱" * bar_off
     pct     = round((filled_regular / 22) * 100)
 
-    status_icon = "🟢" if data.get("status", "OPEN") == "OPEN" else "🔴"
+    status_open = data.get("status", "OPEN") == "OPEN"
+    status_icon = "🟢" if status_open else "🔴"
+    status_text = "OPEN" if status_open else "CLOSED"
 
-    embed = discord.Embed(
-        title=f"🏆  {cfg['name']}",
-        color=cfg["color"],
-        timestamp=datetime.utcnow(),
-    )
+    embed = discord.Embed(color=cfg["color"], timestamp=datetime.utcnow())
+    embed.set_author(name=f"🏆  {cfg['name']}")
     embed.description = (
-        f"{status_icon}  `{data.get('status','OPEN')}`  ·  "
-        f"**{total_filled + 1}/25** slots  ·  "
-        f"✅ **{confirmed_count}** confirmed\n"
+        f"{status_icon} **{status_text}**  ╎  "
+        f"**{total_filled + 1} / 25** სლოტი  ╎  "
+        f"{CONFIRM_DISPLAY} **{confirmed_count}** დადასტ.  ╎  "
+        f"{WAIT_DISPLAY} **{unconfirmed}** მოლოდ.\n"
         f"```{bar}  {pct}%```"
-        f"──────────────────────────────"
+        f"```\n◈ SLOT LIST ◈\n```"
     )
 
     lines = []
 
-    # Slot 01 — Admin
-    lines.append(f"🛡️  `01`  **ELITE HOST** *(admin)*")
-    lines.append("⠀")   # thin spacer
+    # ── Slot 01 Admin ──
+    lines.append(f"🛡️  `01`  ╎  **ELITE HOST**  *[ADMIN]*")
+    lines.append("┄" * 22)
 
-    # Slots 02 – 23
+    # ── Slots 02–23 ──
     for slot_num in range(2, 24):
         idx = slot_num - 2
         if idx < len(teams):
-            t    = teams[idx]
+            t   = teams[idx]
             icon = CONFIRM_DISPLAY if t.get("confirmed") else WAIT_DISPLAY
             mgr  = _member_name(guild, t["manager_id"])
             lines.append(
-                f"{icon}  `{slot_num:02d}`  **{t['name']}**  `[{t['tag']}]`\n"
-                f"⠀⠀⠀⠀└ 👤 {mgr}"
+                f"{icon}  `{slot_num:02d}`  ╎  **{t['name']}**  `{t['tag']}`\n"
+                f"⠀⠀⠀⠀⠀╰ 👤 {mgr}"
             )
         else:
-            lines.append(f"▫️  `{slot_num:02d}`  *— open —*")
+            lines.append(f"◻️  `{slot_num:02d}`  ╎  *— თავისუფალია —*")
 
-        # Visual divider every 4 slots
-        if slot_num in (5, 9, 13, 17, 21):
-            lines.append("⠀")
+        # Divider every 5 slots for readability
+        if slot_num in (6, 11, 16, 21):
+            lines.append("┄" * 22)
 
-    lines.append("⠀")
-
-    # VIP Slots 24 & 25
+    # ── VIP Slots 24 & 25 ──
+    lines.append("┄" * 22)
+    lines.append(f"```\n◈ VIP SLOTS ◈\n```")
     for slot_num in [24, 25]:
         v = vips.get(str(slot_num))
         if v:
             icon = CONFIRM_DISPLAY if v.get("confirmed") else WAIT_DISPLAY
             mgr  = _member_name(guild, v["manager_id"])
             lines.append(
-                f"{icon}  {VIP_EMOJI}  `{slot_num}`  **{v['name']}**  `[{v['tag']}]`\n"
-                f"⠀⠀⠀⠀└ 👤 {mgr}"
+                f"{icon}  {VIP_SLOT_EMOJI}  `{slot_num}`  ╎  **{v['name']}**  `{v['tag']}`\n"
+                f"⠀⠀⠀⠀⠀╰ 👤 {mgr}"
             )
         else:
-            lines.append(f"{VIP_EMOJI}  `{slot_num}`  *VIP reserved*")
+            lines.append(f"{VIP_SLOT_EMOJI}  `{slot_num}`  ╎  *VIP სლოტი — დაჯავშნულია*")
 
     embed.add_field(name="", value="\n".join(lines), inline=False)
-    embed.set_footer(text="✅ confirm your slot  ·  ❌ leave  ·  %register ClanName TAG [@manager]")
+    embed.set_footer(
+        text=f"{REACT_CONFIRM} საკუთარი სლოტის დადასტ.  ·  {REACT_CANCEL} სლოტიდან გასვლა  ·  %register ClanName TAG [@manager]"
+    )
     return embed
 
 
@@ -184,24 +188,32 @@ def build_wait_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
     wl  = data.get("waitlist", [])
 
     embed = discord.Embed(
-        title=f"📋  {cfg['name']}  —  WAITLIST",
-        color=0x5865F2,
+        color=0x2B2D31,
         timestamp=datetime.utcnow(),
     )
+    embed.set_author(name=f"📋  {cfg['name']}  —  WAITLIST")
+
     if wl:
         lines = []
         for i, t in enumerate(wl):
             icon = CONFIRM_DISPLAY if t.get("confirmed") else WAIT_DISPLAY
             mgr  = _member_name(guild, t["manager_id"])
             lines.append(
-                f"{icon}  `{i+1:02d}`  **{t['name']}**  `[{t['tag']}]`\n"
-                f"⠀⠀⠀⠀└ 👤 {mgr}"
+                f"{icon}  `#{i+1:02d}`  ╎  **{t['name']}**  `{t['tag']}`\n"
+                f"⠀⠀⠀⠀⠀╰ 👤 {mgr}"
             )
+            if i < len(wl) - 1:
+                lines.append("┄" * 22)
         embed.description = "\n".join(lines)
-        embed.set_footer(text=f"{len(wl)} team(s) waiting  ·  slot freed → first team auto-promoted")
+        embed.set_footer(text=f"სულ {len(wl)} ტიმი მოლოდინში  ·  სლოტი გათავისუფლდება → პირველი ჩადის")
     else:
-        embed.description = "```\nwaitlist is empty\n```"
-        embed.set_footer(text="22 regular slots fill up → waitlist opens")
+        embed.description = (
+            "```\n"
+            "  ვეითლისტი ცარიელია\n"
+            "```\n"
+            "*22 სლოტი შეივსება → ვეითლისტი გაიხსნება*"
+        )
+        embed.set_footer(text="სლოტი გათავისუფლდება → ვეითლისტიდან პირველი ჩადის ავტომატურად")
     return embed
 
 
