@@ -271,18 +271,24 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
         is_admin = reactor.guild_permissions.administrator
         data     = get_data(scrim_key)
-        emoji    = str(payload.emoji)
-        changed  = False
 
-        # ── ✅  CONFIRM ──────────────────────────────────────────────────────
-        if emoji == REACT_CONFIRM:
-            # Check if reactor is a regular team manager
+        # Custom emoji comparison — payload.emoji.id გვაძლევს ID-ს
+        emoji_id = str(payload.emoji.id) if payload.emoji.id else str(payload.emoji)
+
+        CONFIRM_ID = "1503686337415479337"   # Red_Verified
+        CANCEL_ID  = "1503686325226831943"   # verify_red_cross
+
+        changed = False
+
+        # ── CONFIRM ─────────────────────────────────────────────────────────
+        if emoji_id == CONFIRM_ID:
+            # მომხმარებლის საკუთარი სლოტი
             for t in data["teams"]:
                 if t["manager_id"] == reactor.id and not t.get("confirmed"):
                     t["confirmed"] = True
                     changed = True
                     break
-            # Check VIP
+            # VIP სლოტი
             if not changed:
                 for s in ["24", "25"]:
                     v = data["vips"].get(s)
@@ -290,7 +296,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         data["vips"][s]["confirmed"] = True
                         changed = True
                         break
-            # Admin fallback: confirm first unconfirmed team
+            # ადმინი — პირველი დაუდასტურებელი
             if not changed and is_admin:
                 for t in data["teams"]:
                     if not t.get("confirmed"):
@@ -298,12 +304,13 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         changed = True
                         break
 
-        # ── ❌  LEAVE / UNCONFIRM ────────────────────────────────────────────
-        elif emoji == REACT_CANCEL:
-            # Find reactor's confirmed team and remove them
+        # ── CANCEL / LEAVE ──────────────────────────────────────────────────
+        elif emoji_id == CANCEL_ID:
             target_idx = None
+
+            # ვეძებთ reactor-ის სლოტს — confirmed თუ unconfirmed
             for i, t in enumerate(data["teams"]):
-                if t["manager_id"] == reactor.id and t.get("confirmed"):
+                if t["manager_id"] == reactor.id:
                     target_idx = i
                     break
 
@@ -311,41 +318,40 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 removed = data["teams"].pop(target_idx)
                 await apply_roles(reactor, scrim_key, "none")
                 changed = True
-                # Auto-promote first waitlist entry (unconfirmed — must confirm themselves)
+                # ვეითლისტიდან პირველი ჩადის დაუდასტურებლად
                 if data["waitlist"]:
                     promoted = data["waitlist"].pop(0)
-                    promoted["confirmed"] = False   # must confirm via ✅
+                    promoted["confirmed"] = False
                     data["teams"].insert(target_idx, promoted)
                     p_member = guild.get_member(promoted["manager_id"])
                     if p_member:
                         await apply_roles(p_member, scrim_key, "main")
             else:
-                # Check VIP slots
+                # VIP სლოტი
                 for s in ["24", "25"]:
                     v = data["vips"].get(s)
-                    if v and v["manager_id"] == reactor.id and v.get("confirmed"):
+                    if v and v["manager_id"] == reactor.id:
                         del data["vips"][s]
                         await apply_roles(reactor, scrim_key, "none")
                         changed = True
                         break
 
-            # Admin: if still no match, remove last confirmed team
+            # ადმინი — ბოლო სლოტი ამოვარდეს
             if not changed and is_admin:
                 for i in range(len(data["teams"]) - 1, -1, -1):
-                    if data["teams"][i].get("confirmed"):
-                        removed = data["teams"].pop(i)
-                        old_m = guild.get_member(removed["manager_id"])
-                        if old_m:
-                            await apply_roles(old_m, scrim_key, "none")
-                        changed = True
-                        if data["waitlist"]:
-                            promoted = data["waitlist"].pop(0)
-                            promoted["confirmed"] = False
-                            data["teams"].insert(i, promoted)
-                            p_member = guild.get_member(promoted["manager_id"])
-                            if p_member:
-                                await apply_roles(p_member, scrim_key, "main")
-                        break
+                    removed = data["teams"].pop(i)
+                    old_m = guild.get_member(removed["manager_id"])
+                    if old_m:
+                        await apply_roles(old_m, scrim_key, "none")
+                    changed = True
+                    if data["waitlist"]:
+                        promoted = data["waitlist"].pop(0)
+                        promoted["confirmed"] = False
+                        data["teams"].insert(i, promoted)
+                        p_member = guild.get_member(promoted["manager_id"])
+                        if p_member:
+                            await apply_roles(p_member, scrim_key, "main")
+                    break
 
         if changed:
             save_data(scrim_key, data)
