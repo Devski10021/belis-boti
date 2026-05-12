@@ -465,8 +465,28 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         pass
 
     reply = await ctx.send(status_msg)
-    # registration message რჩება — არ იშლება
     await reply.delete(delay=15)
+
+    # ── დარჩენილი სლოტების მესიჯი — ძველი წაიშლება, ახალი ჩნდება ──
+    fresh_data = get_data(key)
+    remaining  = 22 - len(fresh_data["teams"])
+    if remaining > 0:
+        slots_text = f"📊  **{remaining}** სლოტი დარჩენილია!"
+    else:
+        slots_text = f"🔴  სლოტები გაივსო! ვეითლისტი: **{len(fresh_data['waitlist'])}** ტიმი"
+
+    # წავშალოთ წინა "დარჩენილია" მესიჯი
+    slot_counter_key = f"{key}_counter_msg"
+    old_counter_id   = last_msg_ids.get(slot_counter_key)
+    if old_counter_id:
+        try:
+            old_msg = await ctx.channel.fetch_message(old_counter_id)
+            await old_msg.delete()
+        except Exception:
+            pass
+
+    counter_msg = await ctx.send(slots_text)
+    last_msg_ids[slot_counter_key] = counter_msg.id
 
 
 @bot.command()
