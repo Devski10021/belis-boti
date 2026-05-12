@@ -137,49 +137,40 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
         f"```\n◈ SLOT LIST ◈\n```"
     )
 
-    lines = []
-
-    # ── Slot 01 Admin ──
-    lines.append(f"🛡️  `01`  ╎  **ELITE HOST**  *[ADMIN]*")
-    lines.append("┄" * 22)
-
-    # ── Slots 02–23 ──
-    for slot_num in range(2, 24):
+    def slot_line(slot_num, teams):
         idx = slot_num - 2
         if idx < len(teams):
-            t   = teams[idx]
+            t    = teams[idx]
             icon = CONFIRM_DISPLAY if t.get("confirmed") else WAIT_DISPLAY
             mgr  = _member_name(guild, t["manager_id"])
-            lines.append(
-                f"{icon}  `{slot_num:02d}`  ╎  **{t['name']}**  `{t['tag']}`\n"
-                f"⠀⠀⠀⠀⠀╰ 👤 {mgr}"
-            )
-        else:
-            lines.append(f"◻️  `{slot_num:02d}`  ╎  *— თავისუფალია —*")
+            return f"{icon} `{slot_num:02d}` **{t['name']}** `{t['tag']}`\n└ 👤 {mgr}"
+        return f"◻️ `{slot_num:02d}` *— თავისუფალია —*"
 
-        # Divider every 5 slots for readability
-        if slot_num in (6, 11, 16, 21):
-            lines.append("┄" * 22)
+    # ── Left field: slots 01–13 ──
+    left = []
+    left.append("🛡️ `01` **ELITE HOST** *[ADMIN]*")
+    for s in range(2, 14):
+        left.append(slot_line(s, teams))
 
-    # ── VIP Slots 24 & 25 ──
-    lines.append("┄" * 22)
-    lines.append(f"```\n◈ VIP SLOTS ◈\n```")
+    # ── Right field: slots 14–25 ──
+    right = []
+    for s in range(14, 24):
+        right.append(slot_line(s, teams))
+    right.append("─────────────")
     for slot_num in [24, 25]:
         v = vips.get(str(slot_num))
         if v:
             icon = CONFIRM_DISPLAY if v.get("confirmed") else WAIT_DISPLAY
             mgr  = _member_name(guild, v["manager_id"])
-            lines.append(
-                f"{icon}  {VIP_SLOT_EMOJI}  `{slot_num}`  ╎  **{v['name']}**  `{v['tag']}`\n"
-                f"⠀⠀⠀⠀⠀╰ 👤 {mgr}"
+            right.append(
+                f"{icon} {VIP_SLOT_EMOJI} `{slot_num}` **{v['name']}** `{v['tag']}`\n└ 👤 {mgr}"
             )
         else:
-            lines.append(f"{VIP_SLOT_EMOJI}  `{slot_num}`  ╎  *VIP სლოტი — დაჯავშნულია*")
+            right.append(f"{VIP_SLOT_EMOJI} `{slot_num}` *VIP — დაჯავშნულია*")
 
-    embed.add_field(name="", value="\n".join(lines), inline=False)
-    embed.set_footer(
-        text=f"{REACT_CONFIRM} საკუთარი სლოტის დადასტ.  ·  {REACT_CANCEL} სლოტიდან გასვლა  ·  %register ClanName TAG [@manager]"
-    )
+    embed.add_field(name="◈ სლოტები 01–13", value="\n".join(left), inline=True)
+    embed.add_field(name="◈ სლოტები 14–25", value="\n".join(right), inline=True)
+    embed.set_footer(text="confirm საკუთარი სლოტი  ·  cancel სლოტიდან გასვლა  ·  %register ClanName TAG [@manager]")
     return embed
 
 
