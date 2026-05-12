@@ -27,15 +27,18 @@ except Exception as e:
 
 # ─── CONSTANTS ────────────────────────────────────────────────────────────────
 # Application Emojis — როგორც display-ში, ასევე reactions-ში
-VIP_EMOJI        = "<a:loading_loading_loading:1503689198249574542>"   # loading — unconfirmed სლოტი
-VIP_SLOT_EMOJI   = "<:TDE_vip_black_idp:1503689111901311126>"          # VIP 24/25 სლოტი
-CONFIRM_DISPLAY  = "<:Red_Verified:1503686337415479337>"               # confirmed
-CANCEL_DISPLAY   = "<:verify_red_cross:1503686325226831943>"           # unconfirm icon (embed)
+VIP_EMOJI        = "<a:loading_loading_loading:1503689198249574542>"
+VIP_SLOT_EMOJI   = "<:TDE_vip_black_idp:1503689111901311126>"
+CONFIRM_DISPLAY  = "<:confirmed2:1503857123359064154>"                 # confirmed სლოტი
+CANCEL_DISPLAY   = "<:verify_red_cross:1503686325226831943>"
 WAIT_DISPLAY     = "<a:loading_loading_loading:1503689198249574542>"   # unconfirmed — loading
 
 REACT_CONFIRM = "<:Red_Verified:1503686337415479337>"
 REACT_CANCEL  = "<:verify_red_cross:1503686325226831943>"
 REACT_WAIT    = "<:WAITLISTSF:1503687118302482562>"
+
+# რეგისტრაციის უფლება აქვთ ამ როლებს (გარდა ადმინებისა)
+ALLOWED_REG_ROLES = {1255216304831594616, 1255216501305376850}
 
 SCRIMS = {
     "scrim_22": {
@@ -134,7 +137,6 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
         f"{CONFIRM_DISPLAY} **{confirmed_count}** დადასტ.  ╎  "
         f"{WAIT_DISPLAY} **{unconfirmed}** მოლოდ.\n"
         f"```{bar}  {pct}%```"
-        f"```\n◈ SLOT LIST ◈\n```"
     )
 
     def slot_line(slot_num, teams):
@@ -142,8 +144,7 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
         if idx < len(teams):
             t    = teams[idx]
             icon = CONFIRM_DISPLAY if t.get("confirmed") else WAIT_DISPLAY
-            mgr  = _member_name(guild, t["manager_id"])
-            return f"{icon} `{slot_num:02d}` **{t['name']}** `{t['tag']}`\n└ 👤 {mgr}"
+            return f"{icon} `{slot_num:02d}` **{t['name']}** `{t['tag']}`\n└ <@{t['manager_id']}>"
         return f"◻️ `{slot_num:02d}` *— თავისუფალია —*"
 
     # ── Left field: slots 01–13 ──
@@ -161,9 +162,8 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
         v = vips.get(str(slot_num))
         if v:
             icon = CONFIRM_DISPLAY if v.get("confirmed") else WAIT_DISPLAY
-            mgr  = _member_name(guild, v["manager_id"])
             right.append(
-                f"{icon} {VIP_SLOT_EMOJI} `{slot_num}` **{v['name']}** `{v['tag']}`\n└ 👤 {mgr}"
+                f"{icon} {VIP_SLOT_EMOJI} `{slot_num}` **{v['name']}** `{v['tag']}`\n└ <@{v['manager_id']}>"
             )
         else:
             right.append(f"{VIP_SLOT_EMOJI} `{slot_num}` *VIP — დაჯავშნულია*")
@@ -188,10 +188,9 @@ def build_wait_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
         lines = []
         for i, t in enumerate(wl):
             icon = CONFIRM_DISPLAY if t.get("confirmed") else WAIT_DISPLAY
-            mgr  = _member_name(guild, t["manager_id"])
             lines.append(
                 f"{icon}  `#{i+1:02d}`  ╎  **{t['name']}**  `{t['tag']}`\n"
-                f"⠀⠀⠀⠀⠀╰ 👤 {mgr}"
+                f"⠀⠀⠀⠀⠀╰ <@{t['manager_id']}>"
             )
             if i < len(wl) - 1:
                 lines.append("┄" * 22)
@@ -215,7 +214,7 @@ async def refresh_displays(scrim_key: str, guild: discord.Guild):
     # Slot channel
     slot_ch = bot.get_channel(cfg["slot_channel"])
     if slot_ch:
-        await slot_ch.purge(limit=5, check=lambda m: m.author == bot.user)
+        await slot_ch.purge(limit=10, check=lambda m: m.author == bot.user)
         msg = await slot_ch.send(embed=build_slot_embed(scrim_key, data, guild))
         last_msg_ids[scrim_key] = msg.id
         await msg.add_reaction(REACT_CONFIRM)
@@ -224,7 +223,7 @@ async def refresh_displays(scrim_key: str, guild: discord.Guild):
     # Waitlist channel
     wait_ch = bot.get_channel(cfg["wait_channel"])
     if wait_ch:
-        await wait_ch.purge(limit=5, check=lambda m: m.author == bot.user)
+        await wait_ch.purge(limit=10, check=lambda m: m.author == bot.user)
         await wait_ch.send(embed=build_wait_embed(scrim_key, data, guild))
 
 
@@ -360,6 +359,18 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
     """
     key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
     if not key:
+        return
+
+    # უფლების შემოწმება — ადმინი ან დასაშვები როლი
+    author_role_ids = {r.id for r in ctx.author.roles}
+    has_permission  = (
+        ctx.author.guild_permissions.administrator
+        or bool(author_role_ids & ALLOWED_REG_ROLES)
+    )
+    if not has_permission:
+        reply = await ctx.send("❌  რეგისტრაციის უფლება არ გაქვს!")
+        await ctx.message.delete(delay=5)
+        await reply.delete(delay=8)
         return
 
     target = manager or ctx.author
