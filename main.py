@@ -211,20 +211,49 @@ async def refresh_displays(scrim_key: str, guild: discord.Guild):
     cfg  = SCRIMS[scrim_key]
     data = get_data(scrim_key)
 
-    # Slot channel
+    # ── Slot channel — edit existing message or send new one ──
     slot_ch = bot.get_channel(cfg["slot_channel"])
     if slot_ch:
-        await slot_ch.purge(limit=10, check=lambda m: m.author == bot.user)
-        msg = await slot_ch.send(embed=build_slot_embed(scrim_key, data, guild))
-        last_msg_ids[scrim_key] = msg.id
-        await msg.add_reaction(REACT_CONFIRM)
-        await msg.add_reaction(REACT_CANCEL)
+        embed = build_slot_embed(scrim_key, data, guild)
+        existing_id = last_msg_ids.get(scrim_key)
+        edited = False
 
-    # Waitlist channel
+        if existing_id:
+            try:
+                existing_msg = await slot_ch.fetch_message(existing_id)
+                await existing_msg.edit(embed=embed)
+                edited = True
+            except (discord.NotFound, discord.HTTPException):
+                pass
+
+        if not edited:
+            # პირველი გაშვება ან მესიჯი წაშლილია — გავწმინდოთ და ახალი
+            await slot_ch.purge(limit=20, check=lambda m: m.author == bot.user)
+            msg = await slot_ch.send(embed=embed)
+            last_msg_ids[scrim_key] = msg.id
+            await msg.add_reaction(REACT_CONFIRM)
+            await msg.add_reaction(REACT_CANCEL)
+
+    # ── Waitlist channel — same approach ──
     wait_ch = bot.get_channel(cfg["wait_channel"])
     if wait_ch:
-        await wait_ch.purge(limit=10, check=lambda m: m.author == bot.user)
-        await wait_ch.send(embed=build_wait_embed(scrim_key, data, guild))
+        wait_embed = build_wait_embed(scrim_key, data, guild)
+        wait_msg_key = f"{scrim_key}_wait"
+        existing_wait_id = last_msg_ids.get(wait_msg_key)
+        edited = False
+
+        if existing_wait_id:
+            try:
+                existing_wait = await wait_ch.fetch_message(existing_wait_id)
+                await existing_wait.edit(embed=wait_embed)
+                edited = True
+            except (discord.NotFound, discord.HTTPException):
+                pass
+
+        if not edited:
+            await wait_ch.purge(limit=20, check=lambda m: m.author == bot.user)
+            wait_msg = await wait_ch.send(embed=wait_embed)
+            last_msg_ids[wait_msg_key] = wait_msg.id
 
 
 # ─── EVENTS ───────────────────────────────────────────────────────────────────
@@ -232,6 +261,21 @@ async def refresh_displays(scrim_key: str, guild: discord.Guild):
 @bot.event
 async def on_ready():
     logger.info(f"✅  {bot.user} is online.")
+    # ბოტის restart-ზე ძველი მესიჯები მოვძებნოთ
+    for scrim_key, cfg in SCRIMS.items():
+        slot_ch = bot.get_channel(cfg["slot_channel"])
+        if slot_ch:
+            async for msg in slot_ch.history(limit=10):
+                if msg.author == bot.user and msg.embeds:
+                    last_msg_ids[scrim_key] = msg.id
+                    logger.info(f"Found existing slot message for {scrim_key}: {msg.id}")
+                    break
+        wait_ch = bot.get_channel(cfg["wait_channel"])
+        if wait_ch:
+            async for msg in wait_ch.history(limit=10):
+                if msg.author == bot.user and msg.embeds:
+                    last_msg_ids[f"{scrim_key}_wait"] = msg.id
+                    break
 
 
 @bot.event
@@ -421,8 +465,8 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         pass
 
     reply = await ctx.send(status_msg)
-    await ctx.message.delete(delay=6)
-    await reply.delete(delay=9)
+    # registration message რჩება — არ იშლება
+    await reply.delete(delay=15)
 
 
 @bot.command()
