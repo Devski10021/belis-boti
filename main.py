@@ -37,6 +37,10 @@ REACT_CONFIRM = "<:Red_Verified:1503686337415479337>"
 REACT_CANCEL  = "<:verify_red_cross:1503686325226831943>"
 REACT_WAIT    = "<:WAITLISTSF:1503687118302482562>"
 
+YES_EMOJI      = "<:yes_yes:1503890574858518568>"
+WATCH_CHANNEL  = 1485959324978249831   # ჩანელი სადაც მოთაგვას ვადევნებთ თვალს
+WATCH_USER     = 1435624557779095572   # შენი ID — თუ ამ ადამიანს მოთაგეს
+
 # რეგისტრაციის უფლება აქვთ ამ როლებს (გარდა ადმინებისა)
 ALLOWED_REG_ROLES = {1255216304831594616, 1255216501305376850}
 
@@ -279,7 +283,20 @@ async def on_ready():
 
 
 @bot.event
-async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+async def on_message(message: discord.Message):
+    # WATCH_CHANNEL-ში თუ WATCH_USER მოთაგეს → yes_yes რეაქცია
+    if (message.channel.id == WATCH_CHANNEL
+            and not message.author.bot
+            and WATCH_USER in [m.id for m in message.mentions]):
+        try:
+            await message.add_reaction(YES_EMOJI)
+        except Exception as e:
+            logger.warning(f"Reaction error: {e}")
+
+    await bot.process_commands(message)
+
+
+
     if payload.user_id == bot.user.id:
         return
 
