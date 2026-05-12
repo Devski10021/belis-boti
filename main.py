@@ -26,16 +26,15 @@ except Exception as e:
     logger.error(f"MongoDB Connection Error: {e}")
 
 # ─── CONSTANTS ────────────────────────────────────────────────────────────────
-# embed-ში ჩასმული custom ემოჯები (display only)
+# Application Emojis — როგორც display-ში, ასევე reactions-ში
 VIP_EMOJI       = "<:VIP_2:1503677407062917130>"
-CONFIRM_DISPLAY = "<:errblue:1503676384097206293>"
-CANCEL_DISPLAY  = "<:B21:1503676698057637969>"
-WAIT_DISPLAY    = "⏳"
+CONFIRM_DISPLAY = "<:Red_Verified:1503686337415479337>"
+CANCEL_DISPLAY  = "<:verify_red_cross:1503686325226631943>"
+WAIT_DISPLAY    = "<:WAITLISTSF:1503687118302482562>"
 
-# reaction ემოჯები — სტანდარტული რათა ბოტმა შეძლოს დამატება
-REACT_CONFIRM = "✅"
-REACT_CANCEL  = "❌"
-REACT_WAIT    = "⏳"
+REACT_CONFIRM = "<:Red_Verified:1503686337415479337>"
+REACT_CANCEL  = "<:verify_red_cross:1503686325226631943>"
+REACT_WAIT    = "<:WAITLISTSF:1503687118302482562>"
 
 SCRIMS = {
     "scrim_22": {
