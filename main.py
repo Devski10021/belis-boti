@@ -284,12 +284,13 @@ async def on_ready():
 
 @bot.event
 async def on_message(message: discord.Message):
-    # WATCH_CHANNEL-ში თუ WATCH_USER მოთაგეს → yes_yes რეაქცია
+    # WATCH_CHANNEL-ში თუ WATCH_USER მოთაგეს → yes_yes რეაქცია + ტექსტი
     if (message.channel.id == WATCH_CHANNEL
             and not message.author.bot
             and WATCH_USER in [m.id for m in message.mentions]):
         try:
             await message.add_reaction(YES_EMOJI)
+            await message.channel.send(f"{YES_EMOJI} ხო ძმა რა ხდება")
         except Exception as e:
             logger.warning(f"Reaction error: {e}")
 
