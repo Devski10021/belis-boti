@@ -26,10 +26,16 @@ except Exception as e:
     logger.error(f"MongoDB Connection Error: {e}")
 
 # ─── CONSTANTS ────────────────────────────────────────────────────────────────
-VIP_EMOJI    = "<:VIP_2:1503677407062917130>"
-SLOT_EMOJI   = "<:errblue:1503676384097206293>"   # confirm
-WAIT_EMOJI   = "⏳"                                # waitlist react (standard)
-CANCEL_EMOJI = "<:B21:1503676698057637969>"        # unconfirm
+# embed-ში ჩასმული custom ემოჯები (display only)
+VIP_EMOJI       = "<:VIP_2:1503677407062917130>"
+CONFIRM_DISPLAY = "<:errblue:1503676384097206293>"
+CANCEL_DISPLAY  = "<:B21:1503676698057637969>"
+WAIT_DISPLAY    = "⏳"
+
+# reaction ემოჯები — სტანდარტული რათა ბოტმა შეძლოს დამატება
+REACT_CONFIRM = "✅"
+REACT_CANCEL  = "❌"
+REACT_WAIT    = "⏳"
 
 SCRIMS = {
     "scrim_22": {
@@ -141,7 +147,7 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
         idx = slot_num - 2
         if idx < len(teams):
             t    = teams[idx]
-            icon = SLOT_EMOJI if t.get("confirmed") else WAIT_EMOJI
+            icon = CONFIRM_DISPLAY if t.get("confirmed") else WAIT_DISPLAY
             mgr  = _member_name(guild, t["manager_id"])
             lines.append(
                 f"{icon}  `{slot_num:02d}`  **{t['name']}**  `[{t['tag']}]`\n"
@@ -160,7 +166,7 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
     for slot_num in [24, 25]:
         v = vips.get(str(slot_num))
         if v:
-            icon = SLOT_EMOJI if v.get("confirmed") else WAIT_EMOJI
+            icon = CONFIRM_DISPLAY if v.get("confirmed") else WAIT_DISPLAY
             mgr  = _member_name(guild, v["manager_id"])
             lines.append(
                 f"{icon}  {VIP_EMOJI}  `{slot_num}`  **{v['name']}**  `[{v['tag']}]`\n"
@@ -186,7 +192,7 @@ def build_wait_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
     if wl:
         lines = []
         for i, t in enumerate(wl):
-            icon = SLOT_EMOJI if t.get("confirmed") else WAIT_EMOJI
+            icon = CONFIRM_DISPLAY if t.get("confirmed") else WAIT_DISPLAY
             mgr  = _member_name(guild, t["manager_id"])
             lines.append(
                 f"{icon}  `{i+1:02d}`  **{t['name']}**  `[{t['tag']}]`\n"
@@ -210,8 +216,8 @@ async def refresh_displays(scrim_key: str, guild: discord.Guild):
         await slot_ch.purge(limit=5, check=lambda m: m.author == bot.user)
         msg = await slot_ch.send(embed=build_slot_embed(scrim_key, data, guild))
         last_msg_ids[scrim_key] = msg.id
-        await msg.add_reaction(SLOT_EMOJI)
-        await msg.add_reaction(CANCEL_EMOJI)
+        await msg.add_reaction(REACT_CONFIRM)
+        await msg.add_reaction(REACT_CANCEL)
 
     # Waitlist channel
     wait_ch = bot.get_channel(cfg["wait_channel"])
@@ -258,7 +264,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         changed  = False
 
         # ── ✅  CONFIRM ──────────────────────────────────────────────────────
-        if emoji == SLOT_EMOJI:
+        if emoji == REACT_CONFIRM:
             # Check if reactor is a regular team manager
             for t in data["teams"]:
                 if t["manager_id"] == reactor.id and not t.get("confirmed"):
@@ -282,7 +288,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         break
 
         # ── ❌  LEAVE / UNCONFIRM ────────────────────────────────────────────
-        elif emoji == CANCEL_EMOJI:
+        elif emoji == REACT_CANCEL:
             # Find reactor's confirmed team and remove them
             target_idx = None
             for i, t in enumerate(data["teams"]):
@@ -378,13 +384,13 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         await apply_roles(target, key, "main")
         slot_num  = len(data["teams"]) + 1   # +1 because slot 01 is admin
         status_msg = f"✅  **{clan_name}** დარეგისტრირდა! სლოტი → `{slot_num:02d}`"
-        react_with = SLOT_EMOJI   # registered in main list
+        react_with = REACT_CONFIRM   # registered in main list
     else:
         data["waitlist"].append(new_team)
         await apply_roles(target, key, "wait")
         wait_pos   = len(data["waitlist"])
         status_msg = f"⏳  **{clan_name}** ვეითლისტშია! პოზიცია → `{wait_pos}`"
-        react_with = WAIT_EMOJI   # landed on waitlist
+        react_with = REACT_WAIT   # landed on waitlist
 
     save_data(key, data)
     await refresh_displays(key, ctx.guild)
