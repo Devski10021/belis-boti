@@ -26,10 +26,10 @@ except Exception as e:
     logger.error(f"MongoDB Connection Error: {e}")
 
 # ─── CONSTANTS ────────────────────────────────────────────────────────────────
-VIP_EMOJI    = "<:diamond:1390948554956341301>"
-SLOT_EMOJI   = "✅"   # confirmed
-WAIT_EMOJI   = "⏳"   # unconfirmed / waitlist
-CANCEL_EMOJI = "❌"
+VIP_EMOJI    = "<:VIP_2:1503677407062917130>"
+SLOT_EMOJI   = "<:errblue:1503676384097206293>"   # confirm
+WAIT_EMOJI   = "⏳"                                # waitlist react (standard)
+CANCEL_EMOJI = "<:B21:1503676698057637969>"        # unconfirm
 
 SCRIMS = {
     "scrim_22": {
@@ -141,7 +141,7 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
         idx = slot_num - 2
         if idx < len(teams):
             t    = teams[idx]
-            icon = "✅" if t.get("confirmed") else "⏳"
+            icon = SLOT_EMOJI if t.get("confirmed") else WAIT_EMOJI
             mgr  = _member_name(guild, t["manager_id"])
             lines.append(
                 f"{icon}  `{slot_num:02d}`  **{t['name']}**  `[{t['tag']}]`\n"
@@ -160,14 +160,14 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
     for slot_num in [24, 25]:
         v = vips.get(str(slot_num))
         if v:
-            icon = "✅" if v.get("confirmed") else "⏳"
+            icon = SLOT_EMOJI if v.get("confirmed") else WAIT_EMOJI
             mgr  = _member_name(guild, v["manager_id"])
             lines.append(
                 f"{icon}  {VIP_EMOJI}  `{slot_num}`  **{v['name']}**  `[{v['tag']}]`\n"
                 f"⠀⠀⠀⠀└ 👤 {mgr}"
             )
         else:
-            lines.append(f"🔷  {VIP_EMOJI}  `{slot_num}`  *VIP reserved*")
+            lines.append(f"{VIP_EMOJI}  `{slot_num}`  *VIP reserved*")
 
     embed.add_field(name="", value="\n".join(lines), inline=False)
     embed.set_footer(text="✅ confirm your slot  ·  ❌ leave  ·  %register ClanName TAG [@manager]")
@@ -186,7 +186,7 @@ def build_wait_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
     if wl:
         lines = []
         for i, t in enumerate(wl):
-            icon = "✅" if t.get("confirmed") else "⏳"
+            icon = SLOT_EMOJI if t.get("confirmed") else WAIT_EMOJI
             mgr  = _member_name(guild, t["manager_id"])
             lines.append(
                 f"{icon}  `{i+1:02d}`  **{t['name']}**  `[{t['tag']}]`\n"
