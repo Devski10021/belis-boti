@@ -265,7 +265,6 @@ async def refresh_displays(scrim_key: str, guild: discord.Guild):
 @bot.event
 async def on_ready():
     logger.info(f"✅  {bot.user} is online.")
-    # ბოტის restart-ზე ძველი მესიჯები მოვძებნოთ
     for scrim_key, cfg in SCRIMS.items():
         slot_ch = bot.get_channel(cfg["slot_channel"])
         if slot_ch:
@@ -279,6 +278,12 @@ async def on_ready():
             async for msg in wait_ch.history(limit=10):
                 if msg.author == bot.user and msg.embeds:
                     last_msg_ids[f"{scrim_key}_wait"] = msg.id
+                    break
+        reg_ch = bot.get_channel(cfg["reg_channel"])
+        if reg_ch:
+            async for msg in reg_ch.history(limit=20):
+                if msg.author == bot.user and not msg.embeds:
+                    last_msg_ids[f"{scrim_key}_counter_msg"] = msg.id
                     break
 
 
@@ -668,6 +673,21 @@ async def reset(ctx: commands.Context):
     if not key:
         return
     save_data(key, {"teams": [], "waitlist": [], "vips": {}, "status": "OPEN"})
+
+    # counter მესიჯი წავშალოთ reg channel-ში
+    slot_counter_key = f"{key}_counter_msg"
+    old_counter_id   = last_msg_ids.pop(slot_counter_key, None)
+    cfg = SCRIMS[key]
+    if old_counter_id:
+        try:
+            reg_ch = bot.get_channel(cfg["reg_channel"])
+            if reg_ch:
+                old_msg = await reg_ch.fetch_message(old_counter_id)
+                await old_msg.delete()
+        except Exception:
+            pass
+
+    # last_msg_ids-ს არ ვასუფთავებთ — refresh_displays edit-ს გააკეთებს
     await refresh_displays(key, ctx.guild)
     reply = await ctx.send("🔄  სკრიმი გასუფთავდა!")
     await ctx.message.delete(delay=3)
