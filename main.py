@@ -215,44 +215,62 @@ async def refresh_displays(scrim_key: str, guild: discord.Guild):
     cfg  = SCRIMS[scrim_key]
     data = get_data(scrim_key)
 
-    # ── Slot channel — edit existing message or send new one ──
+    # ── Slot channel ──
     slot_ch = bot.get_channel(cfg["slot_channel"])
     if slot_ch:
         embed = build_slot_embed(scrim_key, data, guild)
-        existing_id = last_msg_ids.get(scrim_key)
-        edited = False
 
+        # ჯერ ID-ს ვეძებთ მეხსიერებაში
+        existing_id = last_msg_ids.get(scrim_key)
+
+        # თუ მეხსიერებაში არ გვაქვს — ჩანელში ვეძებთ
+        if not existing_id:
+            async for m in slot_ch.history(limit=20):
+                if m.author == bot.user and m.embeds:
+                    existing_id = m.id
+                    last_msg_ids[scrim_key] = m.id
+                    break
+
+        edited = False
         if existing_id:
             try:
                 existing_msg = await slot_ch.fetch_message(existing_id)
                 await existing_msg.edit(embed=embed)
                 edited = True
             except (discord.NotFound, discord.HTTPException):
-                pass
+                last_msg_ids.pop(scrim_key, None)
 
         if not edited:
-            # პირველი გაშვება ან მესიჯი წაშლილია — გავწმინდოთ და ახალი
+            # ნამდვილად არ არსებობს — გავწმინდოთ და ახალი
             await slot_ch.purge(limit=20, check=lambda m: m.author == bot.user)
             msg = await slot_ch.send(embed=embed)
             last_msg_ids[scrim_key] = msg.id
             await msg.add_reaction(REACT_CONFIRM)
             await msg.add_reaction(REACT_CANCEL)
 
-    # ── Waitlist channel — same approach ──
+    # ── Waitlist channel ──
     wait_ch = bot.get_channel(cfg["wait_channel"])
     if wait_ch:
         wait_embed = build_wait_embed(scrim_key, data, guild)
         wait_msg_key = f"{scrim_key}_wait"
-        existing_wait_id = last_msg_ids.get(wait_msg_key)
-        edited = False
 
+        existing_wait_id = last_msg_ids.get(wait_msg_key)
+
+        if not existing_wait_id:
+            async for m in wait_ch.history(limit=20):
+                if m.author == bot.user and m.embeds:
+                    existing_wait_id = m.id
+                    last_msg_ids[wait_msg_key] = m.id
+                    break
+
+        edited = False
         if existing_wait_id:
             try:
                 existing_wait = await wait_ch.fetch_message(existing_wait_id)
                 await existing_wait.edit(embed=wait_embed)
                 edited = True
             except (discord.NotFound, discord.HTTPException):
-                pass
+                last_msg_ids.pop(wait_msg_key, None)
 
         if not edited:
             await wait_ch.purge(limit=20, check=lambda m: m.author == bot.user)
