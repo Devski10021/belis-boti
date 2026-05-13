@@ -264,21 +264,42 @@ async def refresh_displays(scrim_key: str, guild: discord.Guild):
 
 @bot.event
 async def on_ready():
+    import asyncio
     logger.info(f"✅  {bot.user} is online.")
+    await asyncio.sleep(3)  # cache-ს ველოდებით
     for scrim_key, cfg in SCRIMS.items():
         slot_ch = bot.get_channel(cfg["slot_channel"])
         if slot_ch:
-            async for msg in slot_ch.history(limit=10):
+            # ყველა ბოტის embed მესიჯი ვნახოთ, ძველები წავშალოთ, ბოლო დავტოვოთ
+            bot_msgs = []
+            async for msg in slot_ch.history(limit=20):
                 if msg.author == bot.user and msg.embeds:
-                    last_msg_ids[scrim_key] = msg.id
-                    logger.info(f"Found existing slot message for {scrim_key}: {msg.id}")
-                    break
+                    bot_msgs.append(msg)
+            if bot_msgs:
+                # პირველი (ყველაზე ახალი) დავტოვოთ
+                last_msg_ids[scrim_key] = bot_msgs[0].id
+                # დანარჩენი წავშალოთ
+                for old in bot_msgs[1:]:
+                    try:
+                        await old.delete()
+                    except Exception:
+                        pass
+                logger.info(f"Slot msg for {scrim_key}: {bot_msgs[0].id}")
+
         wait_ch = bot.get_channel(cfg["wait_channel"])
         if wait_ch:
-            async for msg in wait_ch.history(limit=10):
+            bot_msgs = []
+            async for msg in wait_ch.history(limit=20):
                 if msg.author == bot.user and msg.embeds:
-                    last_msg_ids[f"{scrim_key}_wait"] = msg.id
-                    break
+                    bot_msgs.append(msg)
+            if bot_msgs:
+                last_msg_ids[f"{scrim_key}_wait"] = bot_msgs[0].id
+                for old in bot_msgs[1:]:
+                    try:
+                        await old.delete()
+                    except Exception:
+                        pass
+
         reg_ch = bot.get_channel(cfg["reg_channel"])
         if reg_ch:
             async for msg in reg_ch.history(limit=20):
