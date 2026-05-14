@@ -147,25 +147,28 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
     def compact_line(slot_num: int) -> str:
         """ერთი კომპაქტური ხაზი სლოტისთვის."""
         if slot_num == 1:
-            return f"🛡️ `01` **ELITE HOST** — *ADMIN*"
+            return f"🛡️ `01` ~~**ELITE HOST** — ADMIN~~"
 
         if slot_num in [24, 25]:
             v = vips.get(str(slot_num))
             if v:
-                icon = CONFIRM_DISPLAY if v.get("confirmed") else WAIT_DISPLAY
-                m = guild.get_member(v["manager_id"])
+                m   = guild.get_member(v["manager_id"])
                 mgr = m.display_name if m else f"#{v['manager_id']}"
-                # ❗ display_name-ს ვიყენებთ mention-ის მაგივრად — mention embed-ს ბევრ სიმბოლოს მატებს
-                return f"{icon} {VIP_SLOT_EMOJI} `{slot_num}` **{v['name']}** `{v['tag']}` — {mgr}"
+                if v.get("confirmed"):
+                    return f"{VIP_SLOT_EMOJI} `{slot_num}` ~~**{v['name']}** `{v['tag']}` — {mgr}~~"
+                else:
+                    return f"{WAIT_DISPLAY} {VIP_SLOT_EMOJI} `{slot_num}` **{v['name']}** `{v['tag']}` — {mgr}"
             return f"{VIP_SLOT_EMOJI} `{slot_num}` *VIP — დაჯავშნულია*"
 
         idx = slot_num - 2
         if idx < len(teams):
-            t    = teams[idx]
-            icon = CONFIRM_DISPLAY if t.get("confirmed") else WAIT_DISPLAY
-            m    = guild.get_member(t["manager_id"])
-            mgr  = m.display_name if m else f"#{t['manager_id']}"
-            return f"{icon} `{slot_num:02d}` **{t['name']}** `{t['tag']}` — {mgr}"
+            t   = teams[idx]
+            m   = guild.get_member(t["manager_id"])
+            mgr = m.display_name if m else f"#{t['manager_id']}"
+            if t.get("confirmed"):
+                return f"`{slot_num:02d}` ~~**{t['name']}** `{t['tag']}` — {mgr}~~"
+            else:
+                return f"{WAIT_DISPLAY} `{slot_num:02d}` **{t['name']}** `{t['tag']}` — {mgr}"
         return f"◻️ `{slot_num:02d}` *— თავისუფალია —*"
 
     # სლოტები ორ სვეტად — 01–13 და 14–25
