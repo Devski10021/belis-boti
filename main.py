@@ -12,7 +12,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('BelisBot')
 load_dotenv()
 
-# აქ ჩაწერე იმ ხალხის ID ვისაც ბანი აქვთ
 BANNED_USERS = [1234567890]
 
 # ─── DATABASE SETUP ───────────────────────────────────────────────────────────
@@ -26,22 +25,20 @@ except Exception as e:
     logger.error(f"MongoDB Connection Error: {e}")
 
 # ─── CONSTANTS ────────────────────────────────────────────────────────────────
-# Application Emojis — როგორც display-ში, ასევე reactions-ში
 VIP_EMOJI        = "<a:loading_loading_loading:1503689198249574542>"
 VIP_SLOT_EMOJI   = "<:TDE_vip_black_idp:1503689111901311126>"
-CONFIRM_DISPLAY  = "<:confirmed2:1503857123359064154>"                 # confirmed სლოტი
+CONFIRM_DISPLAY  = "<:confirmed2:1503857123359064154>"
 CANCEL_DISPLAY   = "<:verify_red_cross:1503686325226831943>"
-WAIT_DISPLAY     = "<a:loading_loading_loading:1503689198249574542>"   # unconfirmed — loading
+WAIT_DISPLAY     = "<a:loading_loading_loading:1503689198249574542>"
 
 REACT_CONFIRM = "<:Red_Verified:1503686337415479337>"
 REACT_CANCEL  = "<:verify_red_cross:1503686325226831943>"
 REACT_WAIT    = "<:WAITLISTSF:1503687118302482562>"
 
 YES_EMOJI      = "<:yes_yes:1503890574858518568>"
-WATCH_CHANNEL  = 1485959324978249831   # ჩანელი სადაც მოთაგვას ვადევნებთ თვალს
-WATCH_USER     = 1435624557779095572   # შენი ID — თუ ამ ადამიანს მოთაგეს
+WATCH_CHANNEL  = 1485959324978249831
+WATCH_USER     = 1435624557779095572
 
-# რეგისტრაციის უფლება აქვთ ამ როლებს (გარდა ადმინებისა)
 ALLOWED_REG_ROLES = {1255216304831594616, 1255216501305376850}
 
 SCRIMS = {
@@ -70,7 +67,6 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix="%", intents=intents, help_command=None)
 
-# message_id of the last slot embed per scrim (for reaction tracking)
 last_msg_ids: dict[str, int] = {}
 
 
@@ -107,10 +103,10 @@ async def apply_roles(member: discord.Member, scrim_key: str, action: str):
 
 
 # ─── EMBED BUILDERS ──────────────────────────────────────────────────────────
-
-def _member_name(guild: discord.Guild, user_id: int) -> str:
-    m = guild.get_member(user_id)
-    return m.display_name if m else f"#{user_id}"
+#
+# ⚡ FIX: კომპაქტური ფორმატი — ერთ ხაზზე ყველაფერი, embed არ გადალახავს 6000 სიმბოლოს ლიმიტს
+# ფოტოს მსგავსი სტილი: "01. TeamName [TAG] | @Manager"
+#
 
 def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discord.Embed:
     cfg   = SCRIMS[scrim_key]
@@ -122,7 +118,6 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
                      + sum(1 for v in vips.values() if v.get("confirmed")))
     unconfirmed     = total_filled - confirmed_count
 
-    # Progress bar (22 regular slots)
     filled_regular = len(teams)
     bar_on  = round((filled_regular / 22) * 20)
     bar_off = 20 - bar_on
@@ -143,38 +138,43 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
         f"```{bar}  {pct}%```"
     )
 
-    def slot_line(slot_num, teams):
+    # ── კომპაქტური ხაზი ──────────────────────────────────────────────────────
+    # ფორმატი: "✅ 02. TeamName [TAG] | @Manager"
+    # ან       "⏳ 02. TeamName [TAG] | @Manager"  (unconfirmed)
+    # ან       "◻️ 02. — თავისუფალია —"
+    # ერთი ხაზი ≈ 60 სიმბოლო → 25 სლოტი ≈ 1500 სიმბოლო, ლიმიტი 6000-ია ✓
+
+    def compact_line(slot_num: int) -> str:
+        """ერთი კომპაქტური ხაზი სლოტისთვის."""
+        if slot_num == 1:
+            return f"🛡️ `01` **ELITE HOST** — *ADMIN*"
+
+        if slot_num in [24, 25]:
+            v = vips.get(str(slot_num))
+            if v:
+                icon = CONFIRM_DISPLAY if v.get("confirmed") else WAIT_DISPLAY
+                m = guild.get_member(v["manager_id"])
+                mgr = m.display_name if m else f"#{v['manager_id']}"
+                # ❗ display_name-ს ვიყენებთ mention-ის მაგივრად — mention embed-ს ბევრ სიმბოლოს მატებს
+                return f"{icon} {VIP_SLOT_EMOJI} `{slot_num}` **{v['name']}** `{v['tag']}` — {mgr}"
+            return f"{VIP_SLOT_EMOJI} `{slot_num}` *VIP — დაჯავშნულია*"
+
         idx = slot_num - 2
         if idx < len(teams):
             t    = teams[idx]
             icon = CONFIRM_DISPLAY if t.get("confirmed") else WAIT_DISPLAY
-            return f"{icon} `{slot_num:02d}` **{t['name']}** `{t['tag']}`\n└ <@{t['manager_id']}>"
+            m    = guild.get_member(t["manager_id"])
+            mgr  = m.display_name if m else f"#{t['manager_id']}"
+            return f"{icon} `{slot_num:02d}` **{t['name']}** `{t['tag']}` — {mgr}"
         return f"◻️ `{slot_num:02d}` *— თავისუფალია —*"
 
-    # ── Left field: slots 01–13 ──
-    left = []
-    left.append("🛡️ `01` **ELITE HOST** *[ADMIN]*")
-    for s in range(2, 14):
-        left.append(slot_line(s, teams))
+    # სლოტები ორ სვეტად — 01–13 და 14–25
+    left_lines  = [compact_line(s) for s in range(1, 14)]
+    right_lines = [compact_line(s) for s in range(14, 26)]
 
-    # ── Right field: slots 14–25 ──
-    right = []
-    for s in range(14, 24):
-        right.append(slot_line(s, teams))
-    right.append("─────────────")
-    for slot_num in [24, 25]:
-        v = vips.get(str(slot_num))
-        if v:
-            icon = CONFIRM_DISPLAY if v.get("confirmed") else WAIT_DISPLAY
-            right.append(
-                f"{icon} {VIP_SLOT_EMOJI} `{slot_num}` **{v['name']}** `{v['tag']}`\n└ <@{v['manager_id']}>"
-            )
-        else:
-            right.append(f"{VIP_SLOT_EMOJI} `{slot_num}` *VIP — დაჯავშნულია*")
-
-    embed.add_field(name="◈ სლოტები 01–13", value="\n".join(left), inline=True)
-    embed.add_field(name="◈ სლოტები 14–25", value="\n".join(right), inline=True)
-    embed.set_footer(text="confirm საკუთარი სლოტი  ·  cancel სლოტიდან გასვლა  ·  %register ClanName TAG [@manager]")
+    embed.add_field(name="◈ სლოტები 01–13", value="\n".join(left_lines), inline=True)
+    embed.add_field(name="◈ სლოტები 14–25", value="\n".join(right_lines), inline=True)
+    embed.set_footer(text="confirm ✅ • cancel ❌ • %register ClanName TAG [@manager]")
     return embed
 
 
@@ -182,22 +182,17 @@ def build_wait_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
     cfg = SCRIMS[scrim_key]
     wl  = data.get("waitlist", [])
 
-    embed = discord.Embed(
-        color=0x2B2D31,
-        timestamp=datetime.utcnow(),
-    )
+    embed = discord.Embed(color=0x2B2D31, timestamp=datetime.utcnow())
     embed.set_author(name=f"📋  {cfg['name']}  —  WAITLIST")
 
     if wl:
+        # კომპაქტური ვეითლისტი — ერთ ხაზზე
         lines = []
         for i, t in enumerate(wl):
             icon = CONFIRM_DISPLAY if t.get("confirmed") else WAIT_DISPLAY
-            lines.append(
-                f"{icon}  `#{i+1:02d}`  ╎  **{t['name']}**  `{t['tag']}`\n"
-                f"⠀⠀⠀⠀⠀╰ <@{t['manager_id']}>"
-            )
-            if i < len(wl) - 1:
-                lines.append("┄" * 22)
+            m    = guild.get_member(t["manager_id"])
+            mgr  = m.display_name if m else f"#{t['manager_id']}"
+            lines.append(f"{icon} `#{i+1:02d}` **{t['name']}** `{t['tag']}` — {mgr}")
         embed.description = "\n".join(lines)
         embed.set_footer(text=f"სულ {len(wl)} ტიმი მოლოდინში  ·  სლოტი გათავისუფლდება → პირველი ჩადის")
     else:
@@ -220,10 +215,8 @@ async def refresh_displays(scrim_key: str, guild: discord.Guild):
     if slot_ch:
         embed = build_slot_embed(scrim_key, data, guild)
 
-        # ჯერ ID-ს ვეძებთ მეხსიერებაში
         existing_id = last_msg_ids.get(scrim_key)
 
-        # თუ მეხსიერებაში არ გვაქვს — ჩანელში ვეძებთ
         if not existing_id:
             async for m in slot_ch.history(limit=20):
                 if m.author == bot.user and m.embeds:
@@ -241,7 +234,6 @@ async def refresh_displays(scrim_key: str, guild: discord.Guild):
                 last_msg_ids.pop(scrim_key, None)
 
         if not edited:
-            # ნამდვილად არ არსებობს — გავწმინდოთ და ახალი
             await slot_ch.purge(limit=20, check=lambda m: m.author == bot.user)
             msg = await slot_ch.send(embed=embed)
             last_msg_ids[scrim_key] = msg.id
@@ -284,19 +276,16 @@ async def refresh_displays(scrim_key: str, guild: discord.Guild):
 async def on_ready():
     import asyncio
     logger.info(f"✅  {bot.user} is online.")
-    await asyncio.sleep(3)  # cache-ს ველოდებით
+    await asyncio.sleep(3)
     for scrim_key, cfg in SCRIMS.items():
         slot_ch = bot.get_channel(cfg["slot_channel"])
         if slot_ch:
-            # ყველა ბოტის embed მესიჯი ვნახოთ, ძველები წავშალოთ, ბოლო დავტოვოთ
             bot_msgs = []
             async for msg in slot_ch.history(limit=20):
                 if msg.author == bot.user and msg.embeds:
                     bot_msgs.append(msg)
             if bot_msgs:
-                # პირველი (ყველაზე ახალი) დავტოვოთ
                 last_msg_ids[scrim_key] = bot_msgs[0].id
-                # დანარჩენი წავშალოთ
                 for old in bot_msgs[1:]:
                     try:
                         await old.delete()
@@ -328,7 +317,6 @@ async def on_ready():
 
 @bot.event
 async def on_message(message: discord.Message):
-    # WATCH_CHANNEL-ში თუ WATCH_USER მოთაგეს → yes_yes რეაქცია + ტექსტი
     if (message.channel.id == WATCH_CHANNEL
             and not message.author.bot
             and WATCH_USER in [m.id for m in message.mentions]):
@@ -357,7 +345,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         channel = bot.get_channel(payload.channel_id)
         msg     = await channel.fetch_message(payload.message_id)
 
-        # Always remove the reaction so it's reusable
         try:
             await msg.remove_reaction(payload.emoji, reactor)
         except Exception:
@@ -369,23 +356,19 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         is_admin = reactor.guild_permissions.administrator
         data     = get_data(scrim_key)
 
-        # Custom emoji comparison — payload.emoji.id გვაძლევს ID-ს
         emoji_id = str(payload.emoji.id) if payload.emoji.id else str(payload.emoji)
 
-        CONFIRM_ID = "1503686337415479337"   # Red_Verified
-        CANCEL_ID  = "1503686325226831943"   # verify_red_cross
+        CONFIRM_ID = "1503686337415479337"
+        CANCEL_ID  = "1503686325226831943"
 
         changed = False
 
-        # ── CONFIRM ─────────────────────────────────────────────────────────
         if emoji_id == CONFIRM_ID:
-            # მომხმარებლის საკუთარი სლოტი
             for t in data["teams"]:
                 if t["manager_id"] == reactor.id and not t.get("confirmed"):
                     t["confirmed"] = True
                     changed = True
                     break
-            # VIP სლოტი
             if not changed:
                 for s in ["24", "25"]:
                     v = data["vips"].get(s)
@@ -393,7 +376,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         data["vips"][s]["confirmed"] = True
                         changed = True
                         break
-            # ადმინი — პირველი დაუდასტურებელი
             if not changed and is_admin:
                 for t in data["teams"]:
                     if not t.get("confirmed"):
@@ -401,11 +383,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         changed = True
                         break
 
-        # ── CANCEL / LEAVE ──────────────────────────────────────────────────
         elif emoji_id == CANCEL_ID:
             target_idx = None
 
-            # ვეძებთ reactor-ის სლოტს — confirmed თუ unconfirmed
             for i, t in enumerate(data["teams"]):
                 if t["manager_id"] == reactor.id:
                     target_idx = i
@@ -415,7 +395,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 removed = data["teams"].pop(target_idx)
                 await apply_roles(reactor, scrim_key, "none")
                 changed = True
-                # ვეითლისტიდან პირველი ჩადის დაუდასტურებლად
                 if data["waitlist"]:
                     promoted = data["waitlist"].pop(0)
                     promoted["confirmed"] = False
@@ -424,7 +403,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     if p_member:
                         await apply_roles(p_member, scrim_key, "main")
             else:
-                # VIP სლოტი
                 for s in ["24", "25"]:
                     v = data["vips"].get(s)
                     if v and v["manager_id"] == reactor.id:
@@ -433,7 +411,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         changed = True
                         break
 
-            # ადმინი — ბოლო სლოტი ამოვარდეს
             if not changed and is_admin:
                 for i in range(len(data["teams"]) - 1, -1, -1):
                     removed = data["teams"].pop(i)
@@ -460,15 +437,10 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
 @bot.command(name="register", aliases=["reg"])
 async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager: discord.Member = None):
-    """
-    %register <ClanName> <TAG> [@manager]
-    Registers a team. If no manager is mentioned, the command author is used.
-    """
     key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
     if not key:
         return
 
-    # უფლების შემოწმება — ადმინი ან დასაშვები როლი
     author_role_ids = {r.id for r in ctx.author.roles}
     has_permission  = (
         ctx.author.guild_permissions.administrator
@@ -490,7 +462,6 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
 
     data = get_data(key)
 
-    # Duplicate check
     already_in = any(t["manager_id"] == target.id for t in data["teams"] + data["waitlist"])
     if already_in:
         reply = await ctx.send(f"⚠️  **{target.display_name}** უკვე რეგისტრირებულია!")
@@ -502,32 +473,30 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         "name":       clan_name,
         "tag":        clan_tag.upper(),
         "manager_id": target.id,
-        "confirmed":  False,   # must confirm via ✅ reaction
+        "confirmed":  False,
     }
 
     if len(data["teams"]) < 22:
         data["teams"].append(new_team)
         await apply_roles(target, key, "main")
-        slot_num  = len(data["teams"]) + 1   # +1 because slot 01 is admin
+        slot_num  = len(data["teams"]) + 1
         status_msg = f"✅  **{clan_name}** დარეგისტრირდა! სლოტი → `{slot_num:02d}`"
-        react_with = REACT_CONFIRM   # registered in main list
+        react_with = REACT_CONFIRM
     else:
         data["waitlist"].append(new_team)
         await apply_roles(target, key, "wait")
         wait_pos   = len(data["waitlist"])
         status_msg = f"⏳  **{clan_name}** ვეითლისტშია! პოზიცია → `{wait_pos}`"
-        react_with = REACT_WAIT   # landed on waitlist
+        react_with = REACT_WAIT
 
     save_data(key, data)
     await refresh_displays(key, ctx.guild)
 
-    # React on the registration message to indicate slot vs waitlist
     try:
         await ctx.message.add_reaction(react_with)
     except Exception:
         pass
 
-    # ── მხოლოდ დარჩენილი სლოტების მესიჯი ──
     fresh_data = get_data(key)
     remaining  = 22 - len(fresh_data["teams"])
     if remaining > 0:
@@ -551,9 +520,6 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setvip(ctx: commands.Context, slot: int, member: discord.Member, clan_tag: str, *, clan_name: str):
-    """
-    %setvip <24|25> @manager <TAG> <ClanName>
-    """
     key = next(
         (k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["slot_channel"]]),
         None,
@@ -580,9 +546,6 @@ async def setvip(ctx: commands.Context, slot: int, member: discord.Member, clan_
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def edit(ctx: commands.Context, slot_num: int, member: discord.Member, clan_tag: str, *, clan_name: str):
-    """
-    %edit <slot> @manager <TAG> <ClanName>
-    """
     key = next(
         (k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["slot_channel"]]),
         None,
@@ -631,9 +594,6 @@ async def edit(ctx: commands.Context, slot_num: int, member: discord.Member, cla
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def remove(ctx: commands.Context, *, target: str):
-    """
-    %remove <slot_number>   OR   %remove @manager
-    """
     key = next(
         (k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["slot_channel"]]),
         None,
@@ -680,7 +640,6 @@ async def remove(ctx: commands.Context, *, target: str):
                 removed = True
                 removed_idx = idx
 
-    # Auto-promote from waitlist (unconfirmed)
     if removed and removed_idx is not None and data["waitlist"]:
         promoted = data["waitlist"].pop(0)
         promoted["confirmed"] = False
@@ -704,7 +663,6 @@ async def remove(ctx: commands.Context, *, target: str):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def reset(ctx: commands.Context):
-    """Reset all data for the scrim associated with this channel."""
     key = next(
         (k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["slot_channel"]]),
         None,
@@ -713,7 +671,6 @@ async def reset(ctx: commands.Context):
         return
     save_data(key, {"teams": [], "waitlist": [], "vips": {}, "status": "OPEN"})
 
-    # counter მესიჯი წავშალოთ reg channel-ში
     slot_counter_key = f"{key}_counter_msg"
     old_counter_id   = last_msg_ids.pop(slot_counter_key, None)
     cfg = SCRIMS[key]
@@ -726,7 +683,6 @@ async def reset(ctx: commands.Context):
         except Exception:
             pass
 
-    # last_msg_ids-ს არ ვასუფთავებთ — refresh_displays edit-ს გააკეთებს
     await refresh_displays(key, ctx.guild)
     reply = await ctx.send("🔄  სკრიმი გასუფთავდა!")
     await ctx.message.delete(delay=3)
@@ -736,7 +692,6 @@ async def reset(ctx: commands.Context):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def refresh(ctx: commands.Context):
-    """Force-refresh the display channels."""
     key = next(
         (k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["slot_channel"], v["wait_channel"]]),
         None,
