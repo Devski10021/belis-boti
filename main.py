@@ -367,11 +367,13 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         changed = False
 
         if emoji_id == CONFIRM_ID:
+            # ჯერ საკუთარი სლოტი — main list
             for t in data["teams"]:
                 if t["manager_id"] == reactor.id and not t.get("confirmed"):
                     t["confirmed"] = True
                     changed = True
                     break
+            # თუ main-ში არ იყო — VIP სლოტი
             if not changed:
                 for s in ["24", "25"]:
                     v = data["vips"].get(s)
@@ -379,25 +381,25 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         data["vips"][s]["confirmed"] = True
                         changed = True
                         break
-            if not changed and is_admin:
-                for t in data["teams"]:
-                    if not t.get("confirmed"):
-                        t["confirmed"] = True
-                        changed = True
-                        break
+            # ადმინი reaction-ით confirm-ს ვერ გააკეთებს სხვისთვის —
+            # ამისთვის %edit ან %remove + %register არსებობს
 
         elif emoji_id == CANCEL_ID:
-            target_idx = None
+            # ❗ მხოლოდ საკუთარი სლოტის გაუქმება — ადმინიც ვერ შლის სხვისას reaction-ით
+            # სხვისი სლოტის წასაშლელად გამოიყენება %remove კომანდა
 
+            # main list-ში ვეძებთ reactor-ის სლოტს
+            target_idx = None
             for i, t in enumerate(data["teams"]):
                 if t["manager_id"] == reactor.id:
                     target_idx = i
                     break
 
             if target_idx is not None:
-                removed = data["teams"].pop(target_idx)
+                data["teams"].pop(target_idx)
                 await apply_roles(reactor, scrim_key, "none")
                 changed = True
+                # ვეითლისტიდან პირველი ავტომატურად ჩადის
                 if data["waitlist"]:
                     promoted = data["waitlist"].pop(0)
                     promoted["confirmed"] = False
@@ -406,6 +408,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     if p_member:
                         await apply_roles(p_member, scrim_key, "main")
             else:
+                # VIP სლოტში ვეძებთ
                 for s in ["24", "25"]:
                     v = data["vips"].get(s)
                     if v and v["manager_id"] == reactor.id:
@@ -413,22 +416,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         await apply_roles(reactor, scrim_key, "none")
                         changed = True
                         break
-
-            if not changed and is_admin:
-                for i in range(len(data["teams"]) - 1, -1, -1):
-                    removed = data["teams"].pop(i)
-                    old_m = guild.get_member(removed["manager_id"])
-                    if old_m:
-                        await apply_roles(old_m, scrim_key, "none")
-                    changed = True
-                    if data["waitlist"]:
-                        promoted = data["waitlist"].pop(0)
-                        promoted["confirmed"] = False
-                        data["teams"].insert(i, promoted)
-                        p_member = guild.get_member(promoted["manager_id"])
-                        if p_member:
-                            await apply_roles(p_member, scrim_key, "main")
-                    break
+                # თუ reactor-ს საერთოდ არ ჰქონდა სლოტი — არაფერი ხდება
 
         if changed:
             save_data(scrim_key, data)
