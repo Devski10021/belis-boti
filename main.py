@@ -27,7 +27,7 @@ except Exception as e:
 # ─── CONSTANTS ────────────────────────────────────────────────────────────────
 VIP_EMOJI        = "<a:loading_loading_loading:1503689198249574542>"
 VIP_SLOT_EMOJI   = "<:TDE_vip_black_idp:1503689111901311126>"
-CONFIRM_DISPLAY  = "<:confirmed2:1503857123359064154>"
+CONFIRM_DISPLAY  = "<:confirmed:1503685210737217616>"
 CANCEL_DISPLAY   = "<:verify_red_cross:1503686325226831943>"
 WAIT_DISPLAY     = "<a:loading_loading_loading:1503689198249574542>"
 
