@@ -110,7 +110,7 @@ async def apply_roles(member: discord.Member, scrim_key: str, action: str):
 
 def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discord.Embed:
     cfg   = SCRIMS[scrim_key]
-    teams = data.get("teams", [])
+    teams = [t for t in data.get("teams", []) if t is not None]  # None სლოტები გამოვრიცხოთ
     vips  = data.get("vips", {})
 
     total_filled    = len(teams) + len(vips)
@@ -161,7 +161,7 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
             return f"{VIP_SLOT_EMOJI} `{slot_num}` *VIP — დაჯავშნულია*"
 
         idx = slot_num - 2
-        if idx < len(teams):
+        if idx < len(teams) and teams[idx] is not None:
             t   = teams[idx]
             m   = guild.get_member(t["manager_id"])
             mgr = m.display_name if m else f"#{t['manager_id']}"
@@ -453,7 +453,10 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
 
     data = get_data(key)
 
-    already_in = any(t["manager_id"] == target.id for t in data["teams"] + data["waitlist"])
+    # None-ებს ვფილტრავთ — %edit-ის მიერ დამატებული ცარიელი პოზიციები
+    real_teams = [t for t in data["teams"] if t is not None]
+
+    already_in = any(t["manager_id"] == target.id for t in real_teams + data["waitlist"])
     if already_in:
         reply = await ctx.send(f"⚠️  **{target.display_name}** უკვე რეგისტრირებულია!")
         await ctx.message.delete(delay=5)
@@ -467,10 +470,16 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         "confirmed":  False,
     }
 
-    if len(data["teams"]) < 22:
-        data["teams"].append(new_team)
+    if len(real_teams) < 22:
+        # პირველი ცარიელი (None) პოზიცია ვიპოვოთ, თუ არ არის — append
+        try:
+            empty_idx = data["teams"].index(None)
+            data["teams"][empty_idx] = new_team
+            slot_num = empty_idx + 2
+        except ValueError:
+            data["teams"].append(new_team)
+            slot_num = len(data["teams"]) + 1
         await apply_roles(target, key, "main")
-        slot_num  = len(data["teams"]) + 1
         status_msg = f"✅  **{clan_name}** დარეგისტრირდა! სლოტი → `{slot_num:02d}`"
         react_with = REACT_CONFIRM
     else:
@@ -489,7 +498,8 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         pass
 
     fresh_data = get_data(key)
-    remaining  = 22 - len(fresh_data["teams"])
+    real_count = len([t for t in fresh_data["teams"] if t is not None])
+    remaining  = 22 - real_count
     if remaining > 0:
         slots_text = f"📊  **{remaining}** სლოტი დარჩენილია!"
     else:
@@ -562,13 +572,18 @@ async def edit(ctx: commands.Context, slot_num: int, member: discord.Member, cla
             "manager_id": member.id,
             "confirmed":  False,
         }
-        if idx < len(data["teams"]):
-            old_m = ctx.guild.get_member(data["teams"][idx]["manager_id"])
+        # თუ სია მოკლეა — None-ებით გავავსოთ სანამ idx-ს მიაღწევს
+        while len(data["teams"]) <= idx:
+            data["teams"].append(None)
+
+        # ძველ მენეჯერს role ჩამოვართვათ
+        old_entry = data["teams"][idx]
+        if old_entry:
+            old_m = ctx.guild.get_member(old_entry["manager_id"])
             if old_m and old_m.id != member.id:
                 await apply_roles(old_m, key, "none")
-            data["teams"][idx] = new_team
-        else:
-            data["teams"].append(new_team)
+
+        data["teams"][idx] = new_team
         await apply_roles(member, key, "main")
     else:
         reply = await ctx.send("❌  Invalid slot number.")
