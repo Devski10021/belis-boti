@@ -152,7 +152,6 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
             t = teams[idx]
             m = guild.get_member(t["manager_id"])
             mgr = f"<@{t['manager_id']}>" if m else f"#{t['manager_id']}"
-            
             if t.get("confirmed"):
                 lines.append(f"🔹 `{slot_num:02d}.` ✅ ~~**{t['name']}** [{t['tag']}] ╎ {mgr}~~")
             else:
@@ -165,7 +164,6 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
         if v:
             m = guild.get_member(v["manager_id"])
             mgr = f"<@{v['manager_id']}>" if m else f"#{v['manager_id']}"
-            
             if v.get("confirmed"):
                 lines.append(f"{VIP_SLOT_EMOJI} `{slot_num}.` ✅ ~~**{v['name']}** [{v['tag']}] ╎ {mgr}~~")
             else:
@@ -382,7 +380,24 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
 @bot.command(name="register", aliases=["reg"])
 async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager: discord.Member = None):
+    # ჩვეულებრივი reg_channel
     key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
+
+    # ✅ wait_channel-იდანაც მუშაობს — მაგრამ მხოლოდ თუ waitlist ღიაა
+    from_wait_channel = False
+    if not key:
+        for k, v in SCRIMS.items():
+            if ctx.channel.id == v["wait_channel"]:
+                data_check = get_data(k)
+                if not data_check.get("waitlist_locked", True):
+                    key = k
+                    from_wait_channel = True
+                else:
+                    reply = await ctx.send("🔒 ვეითლისტი ჩაკეტილია, რეგისტრაცია შეუძლებელია!")
+                    await ctx.message.delete(delay=5); await reply.delete(delay=8)
+                    return
+                break
+
     if not key:
         return
 
@@ -403,12 +418,45 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
     data = get_data(key)
 
     in_main_slots = any(t and t["manager_id"] == target.id for t in data["teams"])
-    waitlist_idx = next((i for i, t in enumerate(data["waitlist"]) if t["manager_id"] == target.id), None)
+    in_waitlist   = any(t and t["manager_id"] == target.id for t in data["waitlist"])
 
     if in_main_slots:
         reply = await ctx.send(f"⚠️  **{target.display_name}** უკვე რეგისტრირებულია ძირითად სლოტებში!")
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
+
+    # ✅ wait_channel-იდან რეგისტრაცია — პირდაპირ სლოტში სვავს (თუ ადგილია)
+    if from_wait_channel:
+        if in_waitlist:
+            reply = await ctx.send(f"⚠️  **{target.display_name}** უკვე ვეითლისტშია!")
+            await ctx.message.delete(delay=5); await reply.delete(delay=8)
+            return
+
+        new_team = {
+            "name":       clan_name,
+            "tag":        clan_tag.upper(),
+            "manager_id": target.id,
+            "confirmed":  False,
+        }
+
+        try:
+            empty_idx = data["teams"].index(None)
+            data["teams"][empty_idx] = new_team
+            await apply_roles(target, key, "main")
+            react_with = REACT_CONFIRM
+        except ValueError:
+            reply = await ctx.send(f"⚠️  **{target.display_name}**, ძირითად სლოტებში თავისუფალი ადგილი არ არის!")
+            await ctx.message.delete(delay=5); await reply.delete(delay=8)
+            return
+
+        save_data(key, data)
+        await refresh_displays(key, ctx.guild)
+        try: await ctx.message.add_reaction(react_with)
+        except Exception: pass
+        return
+
+    # ჩვეულებრივი reg_channel ლოგიკა
+    waitlist_idx = next((i for i, t in enumerate(data["waitlist"]) if t["manager_id"] == target.id), None)
 
     if waitlist_idx is not None:
         if data.get("waitlist_locked", True):
@@ -422,10 +470,8 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
                 moving_team["name"] = clan_name
                 moving_team["tag"] = clan_tag.upper()
                 moving_team["confirmed"] = False
-                
                 data["teams"][empty_idx] = moving_team
                 await apply_roles(target, key, "main")
-                
                 save_data(key, data)
                 await refresh_displays(key, ctx.guild)
                 try: await ctx.message.add_reaction(REACT_CONFIRM)
@@ -446,7 +492,6 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
     try:
         empty_idx = data["teams"].index(None)
         data["teams"][empty_idx] = new_team
-        slot_num = empty_idx + 2
         await apply_roles(target, key, "main")
         react_with = REACT_CONFIRM
     except ValueError:
@@ -479,7 +524,9 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def lock_wait(ctx: commands.Context):
-    key = next((k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["slot_channel"]]), None)
+    key = next((k for k, v in SCRIMS.items() if ctx.channel.id in [
+        v["reg_channel"], v["slot_channel"], v["wait_channel"]
+    ]), None)
     if not key: return
     data = get_data(key)
     data["waitlist_locked"] = True
@@ -492,7 +539,9 @@ async def lock_wait(ctx: commands.Context):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def unlock_wait(ctx: commands.Context):
-    key = next((k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["slot_channel"]]), None)
+    key = next((k for k, v in SCRIMS.items() if ctx.channel.id in [
+        v["reg_channel"], v["slot_channel"], v["wait_channel"]
+    ]), None)
     if not key: return
     data = get_data(key)
     data["waitlist_locked"] = False
@@ -544,13 +593,11 @@ async def edit(ctx: commands.Context, slot_num: int, member: discord.Member, cla
         await apply_roles(member, key, "main")
     elif 2 <= slot_num <= 23:
         idx = slot_num - 2
-        
         old_entry = data["teams"][idx]
         if old_entry:
             old_m = ctx.guild.get_member(old_entry["manager_id"])
             if old_m and old_m.id != member.id:
                 await apply_roles(old_m, key, "none")
-
         data["teams"][idx] = new_team
         await apply_roles(member, key, "main")
     else:
