@@ -133,7 +133,6 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
     embed = discord.Embed(color=cfg["color"], timestamp=datetime.utcnow())
     embed.set_author(name=f"🏆  {cfg['name']}")
     
-    # ზედა საინფორმაციო ბლოკი
     header_text = (
         f"{status_icon} **{status_text}** ╎  "
         f"**{total_filled + 1} / 25** სლოტი  ╎  "
@@ -143,11 +142,8 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
     )
 
     lines = []
-    
-    # სლოტი 1: ადმინისტრატორი / ჰოსტი
     lines.append("🔹 `01.` 🛡️ **ELITE HOST** — ADMIN")
 
-    # სლოტები 2-დან 23-მდე (რეგულარული გუნდები)
     for slot_num in range(2, 24):
         idx = slot_num - 2
         if idx < len(teams) and teams[idx] is not None:
@@ -162,7 +158,6 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
         else:
             lines.append(f"🔹 `{slot_num:02d}.` ◻️ *— თავისუფალია —*")
 
-    # სლოტები 24 და 25 (VIP სლოტები)
     for slot_num in [24, 25]:
         v = vips.get(str(slot_num))
         if v:
@@ -176,7 +171,6 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
         else:
             lines.append(f"{VIP_SLOT_EMOJI} `{slot_num}.` ◻️ *VIP — დაჯავშნულია*")
 
-    # მთლიანი სტრუქტურის გაერთიანება description-ში
     embed.description = header_text + "\n".join(lines)
     embed.set_footer(text="confirm ✅ • cancel ❌ • %register ClanName TAG [@manager]")
     return embed
