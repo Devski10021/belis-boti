@@ -418,20 +418,15 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
     data = get_data(key)
 
     in_main_slots = any(t and t["manager_id"] == target.id for t in data["teams"])
-    in_waitlist   = any(t and t["manager_id"] == target.id for t in data["waitlist"])
+    waitlist_idx = next((i for i, t in enumerate(data["waitlist"]) if t["manager_id"] == target.id), None)
 
     if in_main_slots:
         reply = await ctx.send(f"⚠️  **{target.display_name}** უკვე რეგისტრირებულია ძირითად სლოტებში!")
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
 
-    # ✅ wait_channel-იდან რეგისტრაცია — პირდაპირ სლოტში სვავს (თუ ადგილია)
+    # ✅ wait_channel-იდან რეგისტრაცია — პირდაპირ სლოტში სვავს და შლის ვეითლისტიდან
     if from_wait_channel:
-        if in_waitlist:
-            reply = await ctx.send(f"⚠️  **{target.display_name}** უკვე ვეითლისტშია!")
-            await ctx.message.delete(delay=5); await reply.delete(delay=8)
-            return
-
         new_team = {
             "name":       clan_name,
             "tag":        clan_tag.upper(),
@@ -443,6 +438,11 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
             empty_idx = data["teams"].index(None)
             data["teams"][empty_idx] = new_team
             await apply_roles(target, key, "main")
+            
+            # 🚀 თუ უკვე იყო სიაში, ვშლით ვეითლისტიდან
+            if waitlist_idx is not None:
+                data["waitlist"].pop(waitlist_idx)
+                
             react_with = REACT_CONFIRM
         except ValueError:
             reply = await ctx.send(f"⚠️  **{target.display_name}**, ძირითად სლოტებში თავისუფალი ადგილი არ არის!")
@@ -456,8 +456,6 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         return
 
     # ჩვეულებრივი reg_channel ლოგიკა
-    waitlist_idx = next((i for i, t in enumerate(data["waitlist"]) if t["manager_id"] == target.id), None)
-
     if waitlist_idx is not None:
         if data.get("waitlist_locked", True):
             reply = await ctx.send(f"🔒 **{target.display_name}**, ვეითლისტი ამჟამად დაბლოკილია ადმინისტრაციის მიერ!")
