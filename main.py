@@ -25,17 +25,17 @@ except Exception as e:
     logger.error(f"MongoDB Connection Error: {e}")
 
 # ─── CONSTANTS ────────────────────────────────────────────────────────────────
-VIP_EMOJI        = "⭐"
-VIP_SLOT_EMOJI   = "👑"
-CONFIRM_DISPLAY  = "✅"
-CANCEL_DISPLAY   = "❌"
-WAIT_DISPLAY     = "⏳"
+VIP_EMOJI        = "<a:loading_loading_loading:1503689198249574542>"
+VIP_SLOT_EMOJI   = "<:TDE_vip_black_idp:1503689111901311126>"
+CONFIRM_DISPLAY  = "<:confirmed:1503685210737217616>"
+CANCEL_DISPLAY   = "<:verify_red_cross:1503686325226831943>"
+WAIT_DISPLAY     = "<a:loading_loading_loading:1503689198249574542>"
 
-REACT_CONFIRM = "✅"
-REACT_CANCEL  = "❌"
-REACT_WAIT    = "⏳"
+REACT_CONFIRM = "<:Red_Verified:1503686337415479337>"
+REACT_CANCEL  = "<:verify_red_cross:1503686325226831943>"
+REACT_WAIT    = "<:WAITLISTSF:1503687118302482562>"
 
-YES_EMOJI      = "👍"
+YES_EMOJI      = "<:yes_yes:1503890574858518568>"
 WATCH_CHANNEL  = 1485959324978249831
 WATCH_USER     = 1435624557779095572
 
@@ -149,12 +149,12 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
         if idx < len(teams) and teams[idx] is not None:
             t = teams[idx]
             m = guild.get_member(t["manager_id"])
-            mgr = m.display_name if m else f"Manager"
+            mgr = f"<@{t['manager_id']}>" if m else f"#{t['manager_id']}"
             
             if t.get("confirmed"):
-                lines.append(f"🔹 `{slot_num:02d}.` {CONFIRM_DISPLAY} ~~**{t['name']}** [{t['tag']}] ╎ @{mgr}~~")
+                lines.append(f"🔹 `{slot_num:02d}.` ✅ ~~**{t['name']}** [{t['tag']}] ╎ {mgr}~~")
             else:
-                lines.append(f"🔹 `{slot_num:02d}.` {WAIT_DISPLAY} **{t['name']}** [{t['tag']}] ╎ @{mgr}")
+                lines.append(f"🔹 `{slot_num:02d}.` {WAIT_DISPLAY} **{t['name']}** [{t['tag']}] ╎ {mgr}")
         else:
             lines.append(f"🔹 `{slot_num:02d}.` ◻️ *— თავისუფალია —*")
 
@@ -162,12 +162,12 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
         v = vips.get(str(slot_num))
         if v:
             m = guild.get_member(v["manager_id"])
-            mgr = m.display_name if m else f"VIP Manager"
+            mgr = f"<@{v['manager_id']}>" if m else f"#{v['manager_id']}"
             
             if v.get("confirmed"):
-                lines.append(f"{VIP_SLOT_EMOJI} `{slot_num}.` {CONFIRM_DISPLAY} ~~**{v['name']}** [{v['tag']}] ╎ @{mgr}~~")
+                lines.append(f"{VIP_SLOT_EMOJI} `{slot_num}.` ✅ ~~**{v['name']}** [{v['tag']}] ╎ {mgr}~~")
             else:
-                lines.append(f"{VIP_SLOT_EMOJI} `{slot_num}.` {WAIT_DISPLAY} **{v['name']}** [{v['tag']}] ╎ @{mgr}")
+                lines.append(f"{VIP_SLOT_EMOJI} `{slot_num}.` {WAIT_DISPLAY} **{v['name']}** [{v['tag']}] ╎ {mgr}")
         else:
             lines.append(f"{VIP_SLOT_EMOJI} `{slot_num}.` ◻️ *VIP — დაჯავშნულია*")
 
@@ -188,8 +188,8 @@ def build_wait_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
         for i, t in enumerate(wl):
             icon = CONFIRM_DISPLAY if t.get("confirmed") else WAIT_DISPLAY
             m    = guild.get_member(t["manager_id"])
-            mgr  = m.display_name if m else f"Manager"
-            lines.append(f"{icon} `#{i+1:02d}` **{t['name']}** `{t['tag']}` — @{mgr}")
+            mgr  = f"<@{t['manager_id']}>" if m else f"#{t['manager_id']}"
+            lines.append(f"{icon} `#{i+1:02d}` **{t['name']}** `{t['tag']}` — {mgr}")
         embed.description = "\n".join(lines)
         embed.set_footer(text=f"სულ {len(wl)} ტიმი მოლოდინში  ·  სლოტი გათავისუფლდება → პირველი ჩადის")
     else:
@@ -328,12 +328,13 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             break
 
         data = get_data(scrim_key)
-        
-        # ვამოწმებთ ორივე ტიპის რეაქციას (სტანდარტულსაც და ძველ ID-ებსაც უსაფრთხოებისთვის)
-        emoji_str = str(payload.emoji)
+        emoji_id = str(payload.emoji.id) if payload.emoji.id else str(payload.emoji)
+
+        CONFIRM_ID = "1503686337415479337"
+        CANCEL_ID  = "1503686325226831943"
         changed = False
 
-        if emoji_str in ["✅", "confirm", "1503686337415479337"]:
+        if emoji_id == CONFIRM_ID:
             for t in data["teams"]:
                 if t and t["manager_id"] == reactor.id and not t.get("confirmed"):
                     t["confirmed"] = True
@@ -347,7 +348,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         changed = True
                         break
 
-        elif emoji_str in ["❌", "cancel", "1503686325226831943"]:
+        elif emoji_id == CANCEL_ID:
             target_idx = None
             for i, t in enumerate(data["teams"]):
                 if t and t["manager_id"] == reactor.id:
