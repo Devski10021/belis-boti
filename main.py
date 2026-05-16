@@ -76,7 +76,6 @@ def get_data(key: str) -> dict:
     res = collection.find_one({"_id": key})
     if not res:
         return {"teams": [None] * 22, "waitlist": [], "vips": {}, "status": "OPEN"}
-    # თუ ბაზაში ძველი სტრუქტურაა, ავტომატურად გადავიყვანოთ 22 სლოტიან ფიქსირებულ ფორმატზე
     if "teams" in res and len(res["teams"]) < 22:
         while len(res["teams"]) < 22:
             res["teams"].append(None)
@@ -133,45 +132,52 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
 
     embed = discord.Embed(color=cfg["color"], timestamp=datetime.utcnow())
     embed.set_author(name=f"🏆  {cfg['name']}")
-    embed.description = (
+    
+    # ზედა საინფორმაციო ბლოკი
+    header_text = (
         f"{status_icon} **{status_text}** ╎  "
         f"**{total_filled + 1} / 25** სლოტი  ╎  "
         f"{CONFIRM_DISPLAY} **{confirmed_count}** დადასტ.  ╎  "
         f"{WAIT_DISPLAY} **{unconfirmed}** მოლოდ.\n"
-        f"```{bar}  {pct}%```"
+        f"```{bar}  {pct}%```\n"
     )
 
-    def compact_line(slot_num: int) -> str:
-        if slot_num == 1:
-            return f"🛡️ `01` ~~**ELITE HOST** — ADMIN~~"
+    lines = []
+    
+    # სლოტი 1: ადმინისტრატორი / ჰოსტი
+    lines.append("🔹 `01.` 🛡️ **ELITE HOST** — ADMIN")
 
-        if slot_num in [24, 25]:
-            v = vips.get(str(slot_num))
-            if v:
-                m   = guild.get_member(v["manager_id"])
-                mgr = m.display_name if m else f"#{v['manager_id']}"
-                if v.get("confirmed"):
-                    return f"{VIP_SLOT_EMOJI} `{slot_num}` ~~**{v['name']}** `{v['tag']}` — {mgr}~~"
-                else:
-                    return f"{WAIT_DISPLAY} {VIP_SLOT_EMOJI} `{slot_num}` **{v['name']}** `{v['tag']}` — {mgr}"
-            return f"{VIP_SLOT_EMOJI} `{slot_num}` *VIP — დაჯავშნულია*"
-
+    # სლოტები 2-დან 23-მდე (რეგულარული გუნდები)
+    for slot_num in range(2, 24):
         idx = slot_num - 2
         if idx < len(teams) and teams[idx] is not None:
-            t   = teams[idx]
-            m   = guild.get_member(t["manager_id"])
-            mgr = m.display_name if m else f"#{t['manager_id']}"
+            t = teams[idx]
+            m = guild.get_member(t["manager_id"])
+            mgr = f"<@{t['manager_id']}>" if m else f"#{t['manager_id']}"
+            
             if t.get("confirmed"):
-                return f"`{slot_num:02d}` ~~**{t['name']}** `{t['tag']}` — {mgr}~~"
+                lines.append(f"🔹 `{slot_num:02d}.` {CONFIRM_DISPLAY} ~~**{t['name']}** [{t['tag']}] ╎ {mgr}~~")
             else:
-                return f"{WAIT_DISPLAY} `{slot_num:02d}` **{t['name']}** `{t['tag']}` — {mgr}"
-        return f"◻️ `{slot_num:02d}` *— თავისუფალია —*"
+                lines.append(f"🔹 `{slot_num:02d}.` {WAIT_DISPLAY} **{t['name']}** [{t['tag']}] ╎ {mgr}")
+        else:
+            lines.append(f"🔹 `{slot_num:02d}.` ◻️ *— თავისუფალია —*")
 
-    left_lines  = [compact_line(s) for s in range(1, 14)]
-    right_lines = [compact_line(s) for s in range(14, 26)]
+    # სლოტები 24 და 25 (VIP სლოტები)
+    for slot_num in [24, 25]:
+        v = vips.get(str(slot_num))
+        if v:
+            m = guild.get_member(v["manager_id"])
+            mgr = f"<@{v['manager_id']}>" if m else f"#{v['manager_id']}"
+            
+            if v.get("confirmed"):
+                lines.append(f"{VIP_SLOT_EMOJI} `{slot_num}.` {CONFIRM_DISPLAY} ~~**{v['name']}** [{v['tag']}] ╎ {mgr}~~")
+            else:
+                lines.append(f"{VIP_SLOT_EMOJI} `{slot_num}.` {WAIT_DISPLAY} **{v['name']}** [{v['tag']}] ╎ {mgr}")
+        else:
+            lines.append(f"{VIP_SLOT_EMOJI} `{slot_num}.` ◻️ *VIP — დაჯავშნულია*")
 
-    embed.add_field(name="◈ სლოტები 01–13", value="\n".join(left_lines), inline=True)
-    embed.add_field(name="◈ სლოტები 14–25", value="\n".join(right_lines), inline=True)
+    # მთლიანი სტრუქტურის გაერთიანება description-ში
+    embed.description = header_text + "\n".join(lines)
     embed.set_footer(text="confirm ✅ • cancel ❌ • %register ClanName TAG [@manager]")
     return embed
 
@@ -188,7 +194,7 @@ def build_wait_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
         for i, t in enumerate(wl):
             icon = CONFIRM_DISPLAY if t.get("confirmed") else WAIT_DISPLAY
             m    = guild.get_member(t["manager_id"])
-            mgr  = m.display_name if m else f"#{t['manager_id']}"
+            mgr  = f"<@{t['manager_id']}>" if m else f"#{t['manager_id']}"
             lines.append(f"{icon} `#{i+1:02d}` **{t['name']}** `{t['tag']}` — {mgr}")
         embed.description = "\n".join(lines)
         embed.set_footer(text=f"სულ {len(wl)} ტიმი მოლოდინში  ·  სლოტი გათავისუფლდება → პირველი ჩადის")
@@ -349,7 +355,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                         break
 
         elif emoji_id == CANCEL_ID:
-            # საკუთარი სლოტის გაუქმება ფიქსირებულ მასივში
             target_idx = None
             for i, t in enumerate(data["teams"]):
                 if t and t["manager_id"] == reactor.id:
@@ -357,11 +362,10 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     break
 
             if target_idx is not None:
-                data["teams"][target_idx] = None  # სლოტს ვაცარიელებთ და ვსვამთ None-ს
+                data["teams"][target_idx] = None
                 await apply_roles(reactor, scrim_key, "none")
                 changed = True
                 
-                # თუ ვეითლისტში ხალხია, პირველი გადმოდის ამ გამოთავისუფლებულ სლოტზე
                 if data["waitlist"]:
                     promoted = data["waitlist"].pop(0)
                     promoted["confirmed"] = False
@@ -408,7 +412,6 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
 
     data = get_data(key)
 
-    # შემოწმება უკვე არის თუ არა რეგისტრირებული
     already_in = any(t and t["manager_id"] == target.id for t in data["teams"]) or any(t["manager_id"] == target.id for t in data["waitlist"])
     if already_in:
         reply = await ctx.send(f"⚠️  **{target.display_name}** უკვე რეგისტრირებულია!")
@@ -422,7 +425,6 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         "confirmed":  False,
     }
 
-    # ვეძებთ პირველ თავისუფალ (None) სლოტს 22-დან
     try:
         empty_idx = data["teams"].index(None)
         data["teams"][empty_idx] = new_team
@@ -431,7 +433,6 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         status_msg = f"✅  **{clan_name}** დარეგისტრირდა! სლოტი → `{slot_num:02d}`"
         react_with = REACT_CONFIRM
     except ValueError:
-        # თუ თავისუფალი ადგილი (None) არ მოიძებნა, მიდის ვეითლისტში
         data["waitlist"].append(new_team)
         await apply_roles(target, key, "wait")
         wait_pos   = len(data["waitlist"])
@@ -568,7 +569,6 @@ async def remove(ctx: commands.Context, *, target: str):
                 removed = True
                 removed_idx = idx
 
-    # თუ სლოტი გათავისუფლდა და ვეითლისტში ხალხია, პირველი გადმოვიყვანოთ ზუსტად ამავე სლოტზე
     if removed and removed_idx is not None and data["waitlist"]:
         promoted = data["waitlist"].pop(0)
         promoted["confirmed"] = False
@@ -594,7 +594,6 @@ async def reset(ctx: commands.Context):
     if not key:
         return
         
-    # ცარიელი სტრუქტურა 22 'None' სლოტით
     save_data(key, {"teams": [None] * 22, "waitlist": [], "vips": {}, "status": "OPEN"})
 
     slot_counter_key = f"{key}_counter_msg"
