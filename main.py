@@ -93,7 +93,6 @@ async def apply_roles(member: discord.Member, scrim_key: str, action: str):
     if not member or not isinstance(member, discord.Member):
         return
         
-    # 🚫 თუ იუზერი ბანდადებულია, ფუნქცია ეგრევე ჩერდება და როლს საერთოდ არ აძლევს
     if member.id in BANNED_USERS:
         logger.info(f"Role blocked for banned user: {member.id}")
         return
@@ -385,6 +384,19 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 # ─── COMMANDS ────────────────────────────────────────────────────────────────
 @bot.command(name="register", aliases=["reg"])
 async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager: discord.Member = None):
+    # 🎯 უპირველეს ყოვლისა განვსაზღვროთ სამიზნე ექაუნთი
+    target = manager or ctx.author
+
+    # 🚫 კრიტიკული ცვლილება: ბანის ფილტრი არის პირველ ადგილას! 
+    # თუ იუზერი დაბანილია, კოდი აქედანვე წყდება და როლებს საერთოდ აღარ ამოწმებს.
+    if target.id in BANNED_USERS:
+        try: await ctx.message.add_reaction(REACT_CANCEL)
+        except Exception: pass
+        
+        reply = await ctx.send(f"🚫 რეგისტრაცია უარყოფილია! **{target.display_name}** დაბანილია სკრიმებიდან.")
+        await ctx.message.delete(delay=5); await reply.delete(delay=8)
+        return
+
     # ჩვეულებრივი reg_channel
     key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
 
@@ -413,18 +425,6 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         reply = await ctx.send("❌  რეგისტრაციის უფლება არ გაქვს!")
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
-
-    # 🎯 განვსაზღვროთ ვინ არის თარგეთი
-    target = manager or ctx.author
-
-    # 🚫 კრიტიკული შემოწმება: თუ მომხმარებელი ბანდადებულია, კოდი ეგრევე წყდება აქ!
-    if target.id in BANNED_USERS:
-        try: await ctx.message.add_reaction(REACT_CANCEL)
-        except Exception: pass
-        
-        reply = await ctx.send(f"🚫 რეგისტრაცია უარყოფილია! **{target.display_name}** დაბანილია სკრიმებიდან.")
-        await ctx.message.delete(delay=5); await reply.delete(delay=8)
-        return  # 🛑 ბლოკავს კოდის შემდგომ მუშაობას
 
     data = get_data(key)
 
