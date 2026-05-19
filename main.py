@@ -12,17 +12,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('BelisBot')
 load_dotenv()
 
-# ვისაც ეს role-ებიდან ერთი მაინც ექნება, ვერ დარეგისტრირდება
-BANNED_ROLES = {
-    1263061654220832778,  # |BAN role
-    # დაამატე სხვა ban role ID-ები აქ
-}
-
-def is_banned(member: discord.Member) -> bool:
-    if member is None:
-        return False
-    member_role_ids = {r.id for r in member.roles}
-    return bool(member_role_ids & BANNED_ROLES)
+BANNED_USERS = [1234567890, 1263061654220832778]
 
 # ─── DATABASE SETUP ───────────────────────────────────────────────────────────
 try:
@@ -167,7 +157,7 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
             else:
                 lines.append(f"🔹 `{slot_num:02d}.` {WAIT_DISPLAY} **{t['name']}** [{t['tag']}] ╎ {mgr}")
         else:
-            lines.append(f"🔹 `{slot_num:02d}.` ◻️ *— თავისუფალია —*")
+            lines.append(f"🔹 `{slot_num:02d}.` ◻️ *— Available —*")
 
     for slot_num in [24, 25]:
         v = vips.get(str(slot_num))
@@ -179,7 +169,7 @@ def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
             else:
                 lines.append(f"{VIP_SLOT_EMOJI} `{slot_num}.` {WAIT_DISPLAY} **{v['name']}** [{v['tag']}] ╎ {mgr}")
         else:
-            lines.append(f"{VIP_SLOT_EMOJI} `{slot_num}.` ◻️ *VIP — დაჯავშნულია*")
+            lines.append(f"{VIP_SLOT_EMOJI} `{slot_num}.` ◻️ *VIP — Reserved*")
 
     embed.description = header_text + "\n".join(lines)
     embed.set_footer(text="confirm ✅ • cancel ❌ • %register ClanName TAG [@manager]")
@@ -190,7 +180,7 @@ def build_wait_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
     cfg = SCRIMS[scrim_key]
     wl  = data.get("waitlist", [])
     locked = data.get("waitlist_locked", True)
-    lock_status = "🔒 ჩაკეტილია" if locked else "🔓 ღიაა (გამოიყენეთ %register გადმოსასვლელად)"
+    lock_status = "🔒 Locked" if locked else "🔓 Open (use %register to join)"
 
     embed = discord.Embed(color=0x2B2D31, timestamp=datetime.utcnow())
     embed.set_author(name=f"📋  {cfg['name']}  —  WAITLIST ({lock_status})")
@@ -203,10 +193,10 @@ def build_wait_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discor
             mgr  = f"<@{t['manager_id']}>" if m else f"#{t['manager_id']}"
             lines.append(f"{icon} `#{i+1:02d}` **{t['name']}** `{t['tag']}` — {mgr}")
         embed.description = "\n".join(lines)
-        embed.set_footer(text=f"სულ {len(wl)} ტიმი მოლოდინში  ·  სლოტის გათავისუფლებისას დარეგისტრირდით თავიდან")
+        embed.set_footer(text=f"Total {len(wl)} Team on waitlist · Re-register when a slot becomes free")
     else:
-        embed.description = "```\n ვეითლისტი ცარიელია\n```\n*22 სლოტი შეივსება → ვეითლისტი გაიხსნება*"
-        embed.set_footer(text="დასტური ხდება ხელით რეგისტრაციის გახსნის შემდეგ")
+        embed.description = "```\n Waitlist is empty\n```\n*22 slots will be filled → Waitlist will open*"
+        embed.set_footer(text="Confirmation is done manually after the registration is opened")
     return embed
 
 
@@ -310,7 +300,7 @@ async def on_message(message: discord.Message):
             and WATCH_USER in [m.id for m in message.mentions]):
         try:
             await message.add_reaction(YES_EMOJI)
-            await message.channel.send(f"{YES_EMOJI} ხო ძმა რა ხდება")
+            await message.channel.send(f"{YES_EMOJI} ბარო ლაშააა როგორახარა ლაშა {message.author.mention}!")
         except Exception as e:
             logger.warning(f"Reaction error: {e}")
 
@@ -348,7 +338,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
         if emoji_id == CONFIRM_ID:
             # ─── BAN CHECK: ბანდახული user-ი ვერ დაადასტურებს ─────────────
-            if is_banned(reactor):
+            if reactor.id in BANNED_USERS:
                 break
             # ──────────────────────────────────────────────────────────────
             for t in data["teams"]:
@@ -407,7 +397,7 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
                     key = k
                     from_wait_channel = True
                 else:
-                    reply = await ctx.send("🔒 ვეითლისტი ჩაკეტილია, რეგისტრაცია შეუძლებელია!")
+                    reply = await ctx.send("🔒 Waitlist is locked, registration is not possible!")
                     await ctx.message.delete(delay=5); await reply.delete(delay=8)
                     return
                 break
@@ -419,13 +409,13 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
     has_permission  = ctx.author.guild_permissions.administrator or bool(author_role_ids & ALLOWED_REG_ROLES)
     
     if not has_permission:
-        reply = await ctx.send("❌  რეგისტრაციის უფლება არ გაქვს!")
+        reply = await ctx.send("❌  You are not allowed to register!")
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
 
     target = manager or ctx.author
-    if is_banned(target):
-        reply = await ctx.send("🚫 ეს მომხმარებელი დაბანილია.")
+    if target.id in BANNED_USERS:
+        reply = await ctx.send("🚫 Banned User.")
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
 
@@ -435,7 +425,7 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
     waitlist_idx = next((i for i, t in enumerate(data["waitlist"]) if t["manager_id"] == target.id), None)
 
     if in_main_slots:
-        reply = await ctx.send(f"⚠️  **{target.display_name}** უკვე რეგისტრირებულია ძირითად სლოტებში!")
+        reply = await ctx.send(f"⚠️  **{target.display_name}** Already registered in the main slots")
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
 
@@ -459,7 +449,7 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
                 
             react_with = REACT_CONFIRM
         except ValueError:
-            reply = await ctx.send(f"⚠️  **{target.display_name}**, ძირითად სლოტებში თავისუფალი ადგილი არ არის!")
+            reply = await ctx.send(f"⚠️  **{target.display_name}**, The main slots are fully booked!")
             await ctx.message.delete(delay=5); await reply.delete(delay=8)
             return
 
@@ -472,7 +462,7 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
     # ჩვეულებრივი reg_channel ლოგიკა
     if waitlist_idx is not None:
         if data.get("waitlist_locked", True):
-            reply = await ctx.send(f"🔒 **{target.display_name}**, ვეითლისტი ამჟამად დაბლოკილია ადმინისტრაციის მიერ!")
+            reply = await ctx.send(f"🔒 **{target.display_name}**, Waitlist is currently locked by administration!")
             await ctx.message.delete(delay=5); await reply.delete(delay=8)
             return
         else:
@@ -490,7 +480,7 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
                 except Exception: pass
                 return
             except ValueError:
-                reply = await ctx.send(f"⚠️  **{target.display_name}**, ძირითად სლოტებში თავისუფალი ადგილი არ არის!")
+                reply = await ctx.send(f"⚠️  **{target.display_name}**, The main slots are fully booked!")
                 await ctx.message.delete(delay=5); await reply.delete(delay=8)
                 return
 
@@ -519,7 +509,7 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
 
     real_count = sum(1 for t in data["teams"] if t is not None)
     remaining  = 22 - real_count
-    slots_text = f"📊  **{remaining}** სლოტი დარჩენილია!" if remaining > 0 else f"🔴  სლოტები გაივსო! ვეითლისტი: **{len(data['waitlist'])}** ტიმი"
+    slots_text = f"📊  **{remaining}** Slot Available!" if remaining > 0 else f"🔴  Slots is full! Waitlist: **{len(data['waitlist'])}** ტიმი"
 
     slot_counter_key = f"{key}_counter_msg"
     old_counter_id   = last_msg_ids.get(slot_counter_key)
@@ -544,7 +534,7 @@ async def lock_wait(ctx: commands.Context):
     data["waitlist_locked"] = True
     save_data(key, data)
     await refresh_displays(key, ctx.guild)
-    reply = await ctx.send("🔒 ვეითლისტიდან ძირითად სლოტებში გადმოსვლა დაიბლოკა!")
+    reply = await ctx.send("🔒 Waitlist is locked! Teams cannot move to available slots.")
     await reply.delete(delay=5)
 
 
@@ -559,7 +549,7 @@ async def unlock_wait(ctx: commands.Context):
     data["waitlist_locked"] = False
     save_data(key, data)
     await refresh_displays(key, ctx.guild)
-    reply = await ctx.send("🔓 ვეითლისტი გაიხსნა! გუნდებს შეუძლიათ %register-ით გადმოვიდნენ თავისუფალ სლოტებში!")
+    reply = await ctx.send("🔓 Waitlist is open! Teams can now move to available slots using %register!")
     await reply.delete(delay=5)
 
 
@@ -570,8 +560,8 @@ async def setvip(ctx: commands.Context, slot: int, member: discord.Member, clan_
     if not key or slot not in [24, 25]:
         return
 
-    if is_banned(member):
-        reply = await ctx.send("🚫 ეს მომხმარებელი დაბანილია.")
+    if member.id in BANNED_USERS:
+        reply = await ctx.send("🚫 Banned User.")
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
 
@@ -597,8 +587,8 @@ async def edit(ctx: commands.Context, slot_num: int, member: discord.Member, cla
     if not key:
         return
 
-    if is_banned(member):
-        reply = await ctx.send("🚫 ეს მომხმარებელი დაბანილია.")
+    if member.id in BANNED_USERS:
+        reply = await ctx.send("🚫 Banned User.")
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
 
@@ -686,9 +676,9 @@ async def remove(ctx: commands.Context, *, target: str):
     if removed:
         save_data(key, data)
         await refresh_displays(key, ctx.guild)
-        reply = await ctx.send("✅  ტიმი წაიშალა!")
+        reply = await ctx.send("✅  Team Removed!")
     else:
-        reply = await ctx.send("❌  სლოტი ან მომხმარებელი ვერ მოიძებნა.")
+        reply = await ctx.send("❌  Slot or user not found.")
 
     await ctx.message.delete(delay=5); await reply.delete(delay=8)
 
@@ -714,7 +704,7 @@ async def reset(ctx: commands.Context):
         except Exception: pass
 
     await refresh_displays(key, ctx.guild)
-    reply = await ctx.send("🔄  სკრიმი გასუფთავდა!")
+    reply = await ctx.send("🔄  Scrims Reset!")
     await ctx.message.delete(delay=3); await reply.delete(delay=6)
 
 
@@ -725,7 +715,7 @@ async def refresh(ctx: commands.Context):
     if not key:
         return
     await refresh_displays(key, ctx.guild)
-    reply = await ctx.send("🔁  დისპლეი განახლდა!")
+    reply = await ctx.send("🔁  Display Refreshed!")
     await reply.delete(delay=5)
 
 
