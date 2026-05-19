@@ -78,10 +78,8 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix="%", intents=intents, help_command=None)
 
-# 🚀 გლობალური ცვლადები ორმაგი რეაგირების დასაბლოკად
+# 🚀 გლობალური ცვლადები
 last_msg_ids: dict[str, int] = {}
-processing_messages = set()       
-watch_lock = asyncio.Lock()       
 
 
 # ─── DATABASE ────────────────────────────────────────────────────────────────
@@ -280,9 +278,6 @@ async def refresh_displays(scrim_key: str, guild: discord.Guild):
 async def on_ready():
     logger.info(f"✅  {bot.user} is online.")
 
-    # ✅ restart-ზე watch replied set-ს ვასუფთავებთ
-    last_msg_ids["_watch_replied"] = set()
-
     await asyncio.sleep(3)
     for scrim_key, cfg in SCRIMS.items():
         slot_ch = bot.get_channel(cfg["slot_channel"])
@@ -329,45 +324,16 @@ async def on_message(message: discord.Message):
             and not message.author.bot
             and WATCH_USER in [m.id for m in message.mentions]):
 
-        # 🚀 მკაცრი ასინქრონული ბლოკი, რათა დუბლიკატი ივენთები რიგში ჩადგნენ
-        async with watch_lock:
-            replied = last_msg_ids.get("_watch_replied", set())
-            
-            # თუ მესიჯი უკვე მუშავდება ან უკვე გაეცემა პასუხი, მომენტალურად ვაჩერებთ
-            if message.id in replied or message.id in processing_messages:
-                return
-
-            # დროებით ბაზაში შეყვანა დამუშავების დაწყებამდე
-            processing_messages.add(message.id)
-
         try:
-            # 1. სათითაოდ ვადებთ სამივე მოთხოვნილ ემოჯის იმ ადამიანის მესიჯს, ვინც დაგთაგა
+            # 🚀 ვადებთ მხოლოდ ფოტოზე მითითებულ სამ ემოჯის რეაქციად, ტექსტური პასუხის გარეშე
             await message.add_reaction("<:GamerRage:1503702423921758258>")
             await message.add_reaction("<:yes_yes:1503890574858518568>")
             await message.add_reaction("<:confirmed:1503685210737217616>")
-            
-            # 2. ვუწერთ ზუსტად ერთ რიფლაის
-            await message.channel.send(
-                "wazzap brazza",
-                reference=message
-            )
-            
-            # წარმატებით დასრულების შემდეგ გადაგვაქვს მუდმივ ისტორიაში
-            async with watch_lock:
-                replied = replied | {message.id}
-                if len(replied) > 50:
-                    replied = set(list(replied)[-50:])
-                last_msg_ids["_watch_replied"] = replied
 
         except Exception as e:
-            logger.warning(f"Reaction/Reply error: {e}")
-        finally:
-            # პროცესის დასრულებისას აუცილებლად ვშლით დროებითი ბლოკიდან
-            async with watch_lock:
-                processing_messages.discard(message.id)
+            logger.warning(f"Reaction error: {e}")
 
     await bot.process_commands(message)
-
 
 
 @bot.event
@@ -384,63 +350,63 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         channel = bot.get_channel(payload.channel_id)
         
         try:
-        msg = await channel.fetch_message(payload.message_id)
-        await msg.remove_reaction(payload.emoji, reactor)
-    except Exception:
-        pass
+            msg = await channel.fetch_message(payload.message_id)
+            await msg.remove_reaction(payload.emoji, reactor)
+        except Exception:
+            pass
 
-    if not reactor:
-        break
-
-    data = get_data(scrim_key)
-    emoji_id = str(payload.emoji.id) if payload.emoji.id else str(payload.emoji)
-
-    CONFIRM_ID = "1503686337415479337"
-    CANCEL_ID  = "1503686325226831943"
-    changed = False
-
-    if emoji_id == CONFIRM_ID:
-        # ─── BAN CHECK: ბანდახული user-ი ვერ დაადასტურებს ─────────────
-        if is_banned(reactor):
+        if not reactor:
             break
-        # ──────────────────────────────────────────────────────────────
-        for t in data["teams"]:
-            if t and t["manager_id"] == reactor.id and not t.get("confirmed"):
-                t["confirmed"] = True
+
+        data = get_data(scrim_key)
+        emoji_id = str(payload.emoji.id) if payload.emoji.id else str(payload.emoji)
+
+        CONFIRM_ID = "1503686337415479337"
+        CANCEL_ID  = "1503686325226831943"
+        changed = False
+
+        if emoji_id == CONFIRM_ID:
+            # ─── BAN CHECK: ბანდახული user-ი ვერ დაადასტურებს ─────────────
+            if is_banned(reactor):
+                break
+            # ──────────────────────────────────────────────────────────────
+            for t in data["teams"]:
+                if t and t["manager_id"] == reactor.id and not t.get("confirmed"):
+                    t["confirmed"] = True
+                    changed = True
+                    break
+            if not changed:
+                for s in ["24", "25"]:
+                    v = data["vips"].get(s)
+                    if v and v["manager_id"] == reactor.id and not v.get("confirmed"):
+                        data["vips"][s]["confirmed"] = True
+                        changed = True
+                        break
+
+        elif emoji_id == CANCEL_ID:
+            target_idx = None
+            for i, t in enumerate(data["teams"]):
+                if t and t["manager_id"] == reactor.id:
+                    target_idx = i
+                    break
+
+            if target_idx is not None:
+                data["teams"][target_idx] = None
+                await apply_roles(reactor, scrim_key, "none")
                 changed = True
-                break
-        if not changed:
-            for s in ["24", "25"]:
-                v = data["vips"].get(s)
-                if v and v["manager_id"] == reactor.id and not v.get("confirmed"):
-                    data["vips"][s]["confirmed"] = True
-                    changed = True
-                    break
+            else:
+                for s in ["24", "25"]:
+                    v = data["vips"].get(s)
+                    if v and v["manager_id"] == reactor.id:
+                        del data["vips"][s]
+                        await apply_roles(reactor, scrim_key, "none")
+                        changed = True
+                        break
 
-    elif emoji_id == CANCEL_ID:
-        target_idx = None
-        for i, t in enumerate(data["teams"]):
-            if t and t["manager_id"] == reactor.id:
-                target_idx = i
-                break
-
-        if target_idx is not None:
-            data["teams"][target_idx] = None
-            await apply_roles(reactor, scrim_key, "none")
-            changed = True
-        else:
-            for s in ["24", "25"]:
-                v = data["vips"].get(s)
-                if v and v["manager_id"] == reactor.id:
-                    del data["vips"][s]
-                    await apply_roles(reactor, scrim_key, "none")
-                    changed = True
-                    break
-
-    if changed:
-        save_data(scrim_key, data)
-        await refresh_displays(scrim_key, guild)
-    break
+        if changed:
+            save_data(scrim_key, data)
+            await refresh_displays(scrim_key, guild)
+        break
 
 
 # ─── COMMANDS ────────────────────────────────────────────────────────────────
