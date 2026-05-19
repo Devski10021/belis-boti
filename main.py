@@ -560,6 +560,11 @@ async def setvip(ctx: commands.Context, slot: int, member: discord.Member, clan_
     if not key or slot not in [24, 25]:
         return
 
+    if member.id in BANNED_USERS:
+        reply = await ctx.send("🚫 ეს მომხმარებელი დაბანილია.")
+        await ctx.message.delete(delay=5); await reply.delete(delay=8)
+        return
+
     data = get_data(key)
     data["vips"][str(slot)] = {
         "name":       clan_name,
@@ -580,6 +585,11 @@ async def setvip(ctx: commands.Context, slot: int, member: discord.Member, clan_
 async def edit(ctx: commands.Context, slot_num: int, member: discord.Member, clan_tag: str, *, clan_name: str):
     key = next((k for k, v in SCRIMS.items() if ctx.channel.id in [v["reg_channel"], v["slot_channel"]]), None)
     if not key:
+        return
+
+    if member.id in BANNED_USERS:
+        reply = await ctx.send("🚫 ეს მომხმარებელი დაბანილია.")
+        await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
 
     data = get_data(key)
