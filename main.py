@@ -290,6 +290,19 @@ async def on_ready():
                     try: await old.delete()
                     except Exception: pass
 
+        # reg_channel-ში counter message-ს ვიდენტიფიცირებთ და ძველებს ვშლით
+        reg_ch = bot.get_channel(cfg["reg_channel"])
+        if reg_ch:
+            counter_msgs = []
+            async for msg in reg_ch.history(limit=30):
+                if msg.author == bot.user and not msg.embeds and msg.content.startswith(("📊", "🔴")):
+                    counter_msgs.append(msg)
+            if counter_msgs:
+                last_msg_ids[f"{scrim_key}_counter_msg"] = counter_msgs[0].id
+                for old in counter_msgs[1:]:
+                    try: await old.delete()
+                    except Exception: pass
+
         wait_ch = bot.get_channel(cfg["wait_channel"])
         if wait_ch:
             bot_msgs = []
@@ -308,11 +321,19 @@ async def on_message(message: discord.Message):
     if (message.channel.id == WATCH_CHANNEL
             and not message.author.bot
             and WATCH_USER in [m.id for m in message.mentions]):
-        try:
-            await message.add_reaction(YES_EMOJI)
-            await message.channel.send(f"{YES_EMOJI} ხო ძმა რა ხდება")
-        except Exception as e:
-            logger.warning(f"Reaction error: {e}")
+        # ერთ მესიჯზე მხოლოდ ერთხელ პასუხობს
+        if message.id not in last_msg_ids.get("_watch_replied", set()):
+            replied = last_msg_ids.get("_watch_replied", set())
+            replied.add(message.id)
+            # მხოლოდ ბოლო 50 message id-ს ვინახავთ მეხსიერებაში
+            if len(replied) > 50:
+                replied.pop()
+            last_msg_ids["_watch_replied"] = replied
+            try:
+                await message.add_reaction(YES_EMOJI)
+                await message.channel.send(f"{YES_EMOJI} ხო ძმა რა ხდება")
+            except Exception as e:
+                logger.warning(f"Reaction error: {e}")
 
     await bot.process_commands(message)
 
