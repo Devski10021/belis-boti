@@ -276,6 +276,10 @@ async def refresh_displays(scrim_key: str, guild: discord.Guild):
 async def on_ready():
     import asyncio
     logger.info(f"✅  {bot.user} is online.")
+
+    # ✅ restart-ზე watch replied set-ს ვასუფთავებთ
+    last_msg_ids["_watch_replied"] = set()
+
     await asyncio.sleep(3)
     for scrim_key, cfg in SCRIMS.items():
         slot_ch = bot.get_channel(cfg["slot_channel"])
@@ -321,17 +325,23 @@ async def on_message(message: discord.Message):
     if (message.channel.id == WATCH_CHANNEL
             and not message.author.bot
             and WATCH_USER in [m.id for m in message.mentions]):
-        # ერთ მესიჯზე მხოლოდ ერთხელ პასუხობს
-        if message.id not in last_msg_ids.get("_watch_replied", set()):
-            replied = last_msg_ids.get("_watch_replied", set())
-            replied.add(message.id)
+
+        replied = last_msg_ids.get("_watch_replied", set())
+
+        if message.id not in replied:
+            # ✅ ახალი set ვქმნით (immutable update — race condition-ის თავიდან აცილება)
+            replied = replied | {message.id}
             # მხოლოდ ბოლო 50 message id-ს ვინახავთ მეხსიერებაში
             if len(replied) > 50:
-                replied.pop()
+                replied = set(list(replied)[-50:])
             last_msg_ids["_watch_replied"] = replied
+
             try:
                 await message.add_reaction(YES_EMOJI)
-                await message.channel.send(f"{YES_EMOJI} ხო ძმა რა ხდება")
+                await message.channel.send(
+                    f"{YES_EMOJI} ხო ძმა რა ხდება",
+                    reference=message
+                )
             except Exception as e:
                 logger.warning(f"Reaction error: {e}")
 
