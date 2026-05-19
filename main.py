@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('BelisBot')
 load_dotenv()
 
-BANNED_USERS = [1234567890]
+BANNED_USERS = [1234567890, 1263061654220832778]
 
 # ─── DATABASE SETUP ───────────────────────────────────────────────────────────
 try:
@@ -92,6 +92,12 @@ def save_data(key: str, data: dict):
 async def apply_roles(member: discord.Member, scrim_key: str, action: str):
     if not member or not isinstance(member, discord.Member):
         return
+        
+    # 🚫 თუ იუზერი ბანდადებულია, ფუნქცია ეგრევე ჩერდება და როლს საერთოდ არ აძლევს
+    if member.id in BANNED_USERS:
+        logger.info(f"Role blocked for banned user: {member.id}")
+        return
+
     cfg = SCRIMS[scrim_key]
     r_main = member.guild.get_role(cfg["role_id"])
     r_wait = member.guild.get_role(cfg["wait_role_id"])
@@ -408,19 +414,17 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
 
-    # 🎯 განვსაზღვროთ ვინ არის თარგეთი (მენეჯერი თუ თავად დამწერი)
+    # 🎯 განვსაზღვროთ ვინ არის თარგეთი
     target = manager or ctx.author
 
-    # 🚫 კრიტიკული შესწორება: ბანის შემოწმება ხდება ყველაზე პირველად!
-    # აქ დავამატე შენი მოცემული ID-ც ყოველი შემთხვევისთვის, თუმცა სიაშიც უნდა ეწეროს ზემოთ.
-    if target.id in BANNED_USERS or target.id == 1263061654220832778:
-        # ბოტი რეაქციას უკეთებს იქსს (CANCEL_DISPLAY ან REACT_CANCEL)
+    # 🚫 კრიტიკული შემოწმება: თუ მომხმარებელი ბანდადებულია, კოდი ეგრევე წყდება აქ!
+    if target.id in BANNED_USERS:
         try: await ctx.message.add_reaction(REACT_CANCEL)
         except Exception: pass
         
         reply = await ctx.send(f"🚫 რეგისტრაცია უარყოფილია! **{target.display_name}** დაბანილია სკრიმებიდან.")
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
-        return
+        return  # 🛑 ბლოკავს კოდის შემდგომ მუშაობას
 
     data = get_data(key)
 
@@ -432,7 +436,7 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
 
-    # ✅ wait_channel-იდან რეგისტრაცია — პირდაპირ სლოტში სვავს და შლის ვეითლისტიდან
+    # ✅ wait_channel-იდან რეგისტრაცია
     if from_wait_channel:
         new_team = {
             "name":       clan_name,
@@ -446,7 +450,6 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
             data["teams"][empty_idx] = new_team
             await apply_roles(target, key, "main")
             
-            # 🚀 თუ უკვე იყო სიაში, ვშლით ვეითლისტიდან
             if waitlist_idx is not None:
                 data["waitlist"].pop(waitlist_idx)
                 
