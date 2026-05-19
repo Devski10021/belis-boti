@@ -424,6 +424,11 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         return
 
     target = manager or ctx.author
+    # fetch_member — roles-ის სწორი ჩატვირთვა, cache-ზე არ ვართ დამოკიდებული
+    try:
+        target = await ctx.guild.fetch_member(target.id)
+    except Exception:
+        pass
     if is_banned(target):
         reply = await ctx.send("🚫 ეს მომხმარებელი დაბანილია.")
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
