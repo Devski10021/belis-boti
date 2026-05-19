@@ -12,7 +12,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('BelisBot')
 load_dotenv()
 
-BANNED_USERS = [1234567890, 1263061654220832778]
+# 🛑 ბანების კონფიგურაცია
+BANNED_USERS = [1263061654220832778] 
+BANNED_ROLE_ID = 123456789012345678  # 👈 ᲐᲪᲘᲚᲔᲑᲚᲐᲓ ᲩᲐᲬᲔᲠᲔ ᲐᲥ ᲨᲔᲜᲘ ᲑᲐᲜᲘᲡ ᲠᲝᲚᲘᲡ ID!
 
 # ─── DATABASE SETUP ───────────────────────────────────────────────────────────
 try:
@@ -39,7 +41,8 @@ YES_EMOJI      = "<:yes_yes:1503890574858518568>"
 WATCH_CHANNEL  = 1485959324978249831
 WATCH_USER     = 1435624557779095572
 
-ALLOWED_REG_ROLES = {1255216304831594616, 1255216501305376850}
+# სერვერზე შემოსვლის როლები (ბიჭი / გოგო) - ამათ უფლება აქვთ დარეგისტრირდნენ
+ALLOWED_REG_ROLES = {1255216501305376850, 1255216304831594616}
 
 SCRIMS = {
     "scrim_22": {
@@ -71,7 +74,6 @@ last_msg_ids: dict[str, int] = {}
 
 
 # ─── DATABASE ────────────────────────────────────────────────────────────────
-
 def get_data(key: str) -> dict:
     res = collection.find_one({"_id": key})
     if not res:
@@ -88,12 +90,13 @@ def save_data(key: str, data: dict):
 
 
 # ─── ROLES ───────────────────────────────────────────────────────────────────
-
 async def apply_roles(member: discord.Member, scrim_key: str, action: str):
     if not member or not isinstance(member, discord.Member):
         return
         
-    if member.id in BANNED_USERS:
+    # თუ დაბანილია, როლებს საერთოდ არ ვახებინებთ ბოტს
+    is_banned_role = any(r.id == BANNED_ROLE_ID for r in member.roles)
+    if member.id in BANNED_USERS or is_banned_role:
         logger.info(f"Role blocked for banned user: {member.id}")
         return
 
@@ -115,7 +118,6 @@ async def apply_roles(member: discord.Member, scrim_key: str, action: str):
 
 
 # ─── EMBED BUILDERS ──────────────────────────────────────────────────────────
-
 def build_slot_embed(scrim_key: str, data: dict, guild: discord.Guild) -> discord.Embed:
     cfg   = SCRIMS[scrim_key]
     teams = data.get("teams", [None] * 22)
@@ -266,7 +268,6 @@ async def refresh_displays(scrim_key: str, guild: discord.Guild):
 
 
 # ─── EVENTS ───────────────────────────────────────────────────────────────────
-
 @bot.event
 async def on_ready():
     import asyncio
@@ -384,23 +385,23 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 # ─── COMMANDS ────────────────────────────────────────────────────────────────
 @bot.command(name="register", aliases=["reg"])
 async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager: discord.Member = None):
-    # 🎯 უპირველეს ყოვლისა განვსაზღვროთ სამიზნე ექაუნთი
     target = manager or ctx.author
 
-    # 🚫 კრიტიკული ცვლილება: ბანის ფილტრი არის პირველ ადგილას! 
-    # თუ იუზერი დაბანილია, კოდი აქედანვე წყდება და როლებს საერთოდ აღარ ამოწმებს.
-    if target.id in BANNED_USERS:
-        try: await ctx.message.add_reaction(REACT_CANCEL)
+    # 🛑 ᲑᲐᲜᲘᲡ ᲤᲘᲚᲢᲠᲘ (ᲘᲪᲐᲕᲡ ᲧᲕᲔᲚᲐᲤᲔᲠᲡ)
+    is_banned_role = any(r.id == BANNED_ROLE_ID for r in target.roles)
+    if target.id in BANNED_USERS or is_banned_role:
+        # 1. ეგრევე ვშლით იუზერის დაწერილ %register მესიჯს
+        try: await ctx.message.delete()
         except Exception: pass
         
-        reply = await ctx.send(f"🚫 რეგისტრაცია უარყოფილია! **{target.display_name}** დაბანილია სკრიმებიდან.")
-        await ctx.message.delete(delay=5); await reply.delete(delay=8)
+        # 2. ვუწერთ რომ ბანი ადევს და 5 წამში ამ მესიჯსაც ვშლით
+        reply = await ctx.send(f"🚫 რეგისტრაცია უარყოფილია! **{target.display_name}** ბანი გადევს სკრიმებიდან.")
+        await reply.delete(delay=5)
         return
 
-    # ჩვეულებრივი reg_channel
+    # არხის შემოწმება
     key = next((k for k, v in SCRIMS.items() if ctx.channel.id == v["reg_channel"]), None)
 
-    # ✅ wait_channel-იდანაც მუშაობს — მაგრამ მხოლოდ თუ waitlist ღიაა
     from_wait_channel = False
     if not key:
         for k, v in SCRIMS.items():
@@ -418,6 +419,7 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
     if not key:
         return
 
+    # უფლებების შემოწმება (ბიჭი/გოგო როლები)
     author_role_ids = {r.id for r in ctx.author.roles}
     has_permission  = ctx.author.guild_permissions.administrator or bool(author_role_ids & ALLOWED_REG_ROLES)
     
@@ -436,7 +438,7 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
 
-    # ✅ wait_channel-იდან რეგისტრაცია
+    # ვეითლისტიდან რეგისტრაცია
     if from_wait_channel:
         new_team = {
             "name":       clan_name,
@@ -465,7 +467,7 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         except Exception: pass
         return
 
-    # ჩვეულებრივი reg_channel ლოგიკა
+    # ჩვეულებრივი რეგისტრაცია
     if waitlist_idx is not None:
         if data.get("waitlist_locked", True):
             reply = await ctx.send(f"🔒 **{target.display_name}**, ვეითლისტი ამჟამად დაბლოკილია ადმინისტრაციის მიერ!")
@@ -513,6 +515,7 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
     try: await ctx.message.add_reaction(react_with)
     except Exception: pass
 
+    # სლოტების მათემატიკა
     real_count = sum(1 for t in data["teams"] if t is not None)
     remaining  = 22 - real_count
     slots_text = f"📊  **{remaining}** სლოტი დარჩენილია!" if remaining > 0 else f"🔴  სლოტები გაივსო! ვეითლისტი: **{len(data['waitlist'])}** ტიმი"
