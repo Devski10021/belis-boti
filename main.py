@@ -318,31 +318,33 @@ async def on_ready():
                 for old in bot_msgs[1:]:
                     try: await old.delete()
                     except Exception: pass
-
 @bot.event
 async def on_message(message: discord.Message):
     if (message.channel.id == WATCH_CHANNEL
             and not message.author.bot
             and WATCH_USER in [m.id for m in message.mentions]):
 
-        # შემოწმება ხდება გლობალური last_msg_ids ლექსიკონის გამოყენებით
-        replied = last_msg_ids.get("_watch_replied", set())
+        # ბლოკავს პარალელურ რეაგირებას, სანამ პირველი ივენთი არ მორჩება მუშაობას
+        async with message_lock:
+            replied = last_msg_ids.get("_watch_replied", set())
 
-        if message.id not in replied:
-            # სეტის იმუტაბელური განახლება დუბლირების თავიდან ასაცილებლად
-            replied = replied | {message.id}
-            if len(replied) > 50:
-                replied = set(list(replied)[-50:])
-            last_msg_ids["_watch_replied"] = replied
+            if message.id not in replied:
+                replied = replied | {message.id}
+                if len(replied) > 50:
+                    replied = set(list(replied)[-50:])
+                last_msg_ids["_watch_replied"] = replied
 
-            try:
-                # ემოჯის რეაქცია ამოშლილია, ბოტი მხოლოდ ერთხელ აგზავნის ტექსტურ რიფლაის
-                await message.channel.send(
-                    "whats up brazzaa",
-                    reference=message
-                )
-            except Exception as e:
-                logger.warning(f"Reply error: {e}")
+                try:
+                    # უმატებს ემოჯის იმ ადამიანის მესიჯს, ვინც დაგთაგა
+                    await message.add_reaction(YES_EMOJI)
+                    
+                    # აგზავნის რიფლაის ტექსტით
+                    await message.channel.send(
+                        "whats up brazzaa",
+                        reference=message
+                    )
+                except Exception as e:
+                    logger.warning(f"Reply error: {e}")
 
     await bot.process_commands(message)
 
