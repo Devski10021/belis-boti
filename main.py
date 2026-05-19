@@ -12,7 +12,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('BelisBot')
 load_dotenv()
 
-BANNED_USERS = [1234567890, 1263061654220832778]
+# ვისაც ეს role-ებიდან ერთი მაინც ექნება, ვერ დარეგისტრირდება
+BANNED_ROLES = {
+    1263061654220832778,  # |BAN role
+    # დაამატე სხვა ban role ID-ები აქ
+}
+
+def is_banned(member: discord.Member) -> bool:
+    if member is None:
+        return False
+    member_role_ids = {r.id for r in member.roles}
+    return bool(member_role_ids & BANNED_ROLES)
 
 # ─── DATABASE SETUP ───────────────────────────────────────────────────────────
 try:
@@ -338,7 +348,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
         if emoji_id == CONFIRM_ID:
             # ─── BAN CHECK: ბანდახული user-ი ვერ დაადასტურებს ─────────────
-            if reactor.id in BANNED_USERS:
+            if is_banned(reactor):
                 break
             # ──────────────────────────────────────────────────────────────
             for t in data["teams"]:
@@ -414,7 +424,7 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         return
 
     target = manager or ctx.author
-    if target.id in BANNED_USERS:
+    if is_banned(target):
         reply = await ctx.send("🚫 ეს მომხმარებელი დაბანილია.")
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
@@ -560,7 +570,7 @@ async def setvip(ctx: commands.Context, slot: int, member: discord.Member, clan_
     if not key or slot not in [24, 25]:
         return
 
-    if member.id in BANNED_USERS:
+    if is_banned(member):
         reply = await ctx.send("🚫 ეს მომხმარებელი დაბანილია.")
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
@@ -587,7 +597,7 @@ async def edit(ctx: commands.Context, slot_num: int, member: discord.Member, cla
     if not key:
         return
 
-    if member.id in BANNED_USERS:
+    if is_banned(member):
         reply = await ctx.send("🚫 ეს მომხმარებელი დაბანილია.")
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
