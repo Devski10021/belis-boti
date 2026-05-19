@@ -377,7 +377,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
 
 # ─── COMMANDS ────────────────────────────────────────────────────────────────
-
 @bot.command(name="register", aliases=["reg"])
 async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager: discord.Member = None):
     # ჩვეულებრივი reg_channel
@@ -409,9 +408,17 @@ async def register(ctx: commands.Context, clan_name: str, clan_tag: str, manager
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
 
+    # 🎯 განვსაზღვროთ ვინ არის თარგეთი (მენეჯერი თუ თავად დამწერი)
     target = manager or ctx.author
-    if target.id in BANNED_USERS:
-        reply = await ctx.send("🚫 ეს მომხმარებელი დაბანილია.")
+
+    # 🚫 კრიტიკული შესწორება: ბანის შემოწმება ხდება ყველაზე პირველად!
+    # აქ დავამატე შენი მოცემული ID-ც ყოველი შემთხვევისთვის, თუმცა სიაშიც უნდა ეწეროს ზემოთ.
+    if target.id in BANNED_USERS or target.id == 1263061654220832778:
+        # ბოტი რეაქციას უკეთებს იქსს (CANCEL_DISPLAY ან REACT_CANCEL)
+        try: await ctx.message.add_reaction(REACT_CANCEL)
+        except Exception: pass
+        
+        reply = await ctx.send(f"🚫 რეგისტრაცია უარყოფილია! **{target.display_name}** დაბანილია სკრიმებიდან.")
         await ctx.message.delete(delay=5); await reply.delete(delay=8)
         return
 
