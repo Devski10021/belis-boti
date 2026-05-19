@@ -318,35 +318,43 @@ async def on_ready():
                 for old in bot_msgs[1:]:
                     try: await old.delete()
                     except Exception: pass
+
+
 @bot.event
 async def on_message(message: discord.Message):
     if (message.channel.id == WATCH_CHANNEL
             and not message.author.bot
             and WATCH_USER in [m.id for m in message.mentions]):
 
-        # ბლოკავს პარალელურ რეაგირებას, სანამ პირველი ივენთი არ მორჩება მუშაობას
-        async with message_lock:
-            replied = last_msg_ids.get("_watch_replied", set())
+        # ვიღებთ უკვე ნაპასუხები მესიჯების სიას
+        replied = last_msg_ids.get("_watch_replied", set())
 
-            if message.id not in replied:
-                replied = replied | {message.id}
-                if len(replied) > 50:
-                    replied = set(list(replied)[-50:])
-                last_msg_ids["_watch_replied"] = replied
+        # თუ ID უკვე სიაშია, მომენტალურად ვაჩერებთ ფუნქციას, რომ მეორედ აღარაფერი ქნას
+        if message.id in replied:
+            return
 
-                try:
-                    # უმატებს ემოჯის იმ ადამიანის მესიჯს, ვინც დაგთაგა
-                    await message.add_reaction(YES_EMOJI)
-                    
-                    # აგზავნის რიფლაის ტექსტით
-                    await message.channel.send(
-                        "whats up brazzaa",
-                        reference=message
-                    )
-                except Exception as e:
-                    logger.warning(f"Reply error: {e}")
+        # 🚀 კრიტიკული ფიქსი: მომენტალურად ვამატებთ ID-ს სიაში, სანამ ბოტი რაიმეს გააგზავნის!
+        replied = replied | {message.id}
+        if len(replied) > 50:
+            replied = set(list(replied)[-50:])
+        last_msg_ids["_watch_replied"] = replied
+
+        try:
+            # 1. სათითაოდ ვადებთ სამივე მოთხოვნილ ემოჯის იმ ადამიანის მესიჯს, ვინც დაგთაგა
+            await message.add_reaction("<:GamerRage:1503702423921758258>")
+            await message.add_reaction("<:yes_yes:1503890574858518568>")
+            await message.add_reaction("<:confirmed:1503685210737217616>")
+            
+            # 2. ვუწერთ ზუსტად ერთ რიფლაის
+            await message.channel.send(
+                "wazzap brazza",
+                reference=message
+            )
+        except Exception as e:
+            logger.warning(f"Reaction/Reply error: {e}")
 
     await bot.process_commands(message)
+
 
 
 @bot.event
